@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZooKeeper运维管理工具</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .btn { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-success { background: #48bb78; color: white; }
+        .btn-danger { background: #f56565; color: white; }
+        .btn-warning { background: #ed8936; color: white; }
+        .status { padding: 10px; border-radius: 5px; margin-bottom: 20px; }
+        .status.connected { background: #c6f6d5; color: #22543d; }
+        .status.disconnected { background: #fed7d7; color: #742a2a; }
+        .connection-form input { padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 5px; }
+        .node-tree { background: #f8f9fa; padding: 15px; border-radius: 5px; max-height: 500px; overflow-y: auto; }
+        .node { padding: 5px 10px; cursor: pointer; border-radius: 3px; margin: 2px 0; }
+        .node:hover { background: #e9ecef; }
+        .node-ephemeral { color: #e53e3e; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: white; margin: 10% auto; padding: 20px; border-radius: 10px; width: 80%; max-width: 600px; }
+        .close { float: right; font-size: 28px; cursor: pointer; }
+        .tab-container { display: flex; border-bottom: 1px solid #ddd; }
+        .tab { padding: 10px 20px; cursor: pointer; }
+        .tab.active { border-bottom: 3px solid #667eea; }
+        .tab-content { display: none; padding: 20px 0; }
+        .tab-content.active { display: block; }
+        .data-editor { width: 100%; height: 200px; font-family: monospace; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .stat-item { background: #f8f9fa; padding: 15px; border-radius: 5px; }
+        .notification { position: fixed; top: 20px; right: 20px; padding: 15px; border-radius: 5px; color: white; z-index: 1001; display: none; }
+        .notification.success { background: #48bb78; }
+        .notification.error { background: #f56565; }
+        .notification.info { background: #4299e1; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-paw"></i> ZooKeeper运维管理工具</h1>
+            <p>分布式协调服务的可视化管理和监控</p>
+        </div>
+
+        <div id="notification" class="notification"></div>
+
+        <!-- 连接状态 -->
+        <div id="status" class="status disconnected">
+            未连接到ZooKeeper服务器
+        </div>
+
+        <!-- 连接表单 -->
+        <div class="card">
+            <h2><i class="fas fa-plug"></i> 连接设置</h2>
+            <div class="connection-form">
+                <input type="text" id="servers" placeholder="服务器地址 (如: localhost:2181,localhost:2182)" style="width: 400px;">
+                <input type="number" id="timeout" placeholder="超时时间(秒)" value="5" style="width: 150px;">
+                <button class="btn btn-primary" onclick="connect()">连接</button>
+                <button class="btn btn-danger" onclick="disconnect()">断开</button>
+            </div>
+        </div>
+
+        <!-- 标签页 -->
+        <div class="card">
+            <div class="tab-container">
+                <div class="tab active" onclick="showTab('nodes')">节点管理</div>
+                <div class="tab" onclick="showTab('data')">数据操作</div>
+                <div class="tab" onclick="showTab('monitor')">监控</div>
+                <div class="tab" onclick="showTab('acl')">ACL管理</div>
+                <div class="tab" onclick="showTab('stats')">统计信息</div>
+            </div>
+
+            <!-- 节点管理标签页 -->
+            <div id="tab-nodes" class="tab-content active">
+                <div style="display: flex; gap: 20px;">
+                    <div style="flex: 1;">
+                        <h3>节点树</h3>
+                        <div class="node-tree" id="nodeTree">
+                            <div class="node" onclick="loadNode('/')">
+                                <i class="fas fa-folder"></i> / (根节点)
+                            </div>
+                        </div>
+                    </div>
+                    <div style="flex: 2;">
+                        <h3>节点操作</h3>
+                        <div style="margin-bottom: 20px;">
+                            <input type="text" id="nodePath" placeholder="/path/to/node" style="width: 300px; padding: 10px;">
+                            <button class="btn btn-primary" onclick="getNode()">查看节点</button>
+                            <button class="btn btn-success" onclick="showCreateModal()">创建节点</button>
+                            <button class="btn btn-danger" onclick="deleteNode()">删除节点</button>
+                        </div>
+                        
+                        <div id="nodeDetails">
+                            <!-- 节点详情将在这里显示 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数据操作标签页 -->
+            <div id="tab-data" class="tab-content">
+                <h3>节点数据</h3>
+                <div style="margin-bottom: 20px;">
+                    <input type="text" id="dataPath" placeholder="/path/to/node" style="width: 300px; padding: 10px;">
+                    <button class="btn btn-primary" onclick="loadNodeData()">加载数据</button>
+                </div>
+                
+                <div>
+                    <label>节点数据:</label>
+                    <textarea id="nodeData" class="data-editor" placeholder="节点数据内容"></textarea>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <button class="btn btn-success" onclick="updateNodeData()">更新数据</button>
+                    <button class="btn btn-warning" onclick="watchNode()">监听节点</button>
+                </div>
+            </div>
+
+            <!-- 监控标签页 -->
+            <div id="tab-monitor" class="tab-content">
+                <h3>集群监控</h3>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <h4>连接状态</h4>
+                        <div id="connectionStats">-</div>
+                    </div>
+                    <div class="stat-item">
+                        <h4>节点统计</h4>
+                        <div id="nodeStats">-</div>
+                    </div>
+                    <div class="stat-item">
+                        <h4>服务器信息</h4>
+                        <div id="serverInfo">-</div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <button class="btn btn-primary" onclick="refreshStats()">刷新统计</button>
+                </div>
+            </div>
+
+            <!-- ACL管理标签页 -->
+            <div id="tab-acl" class="tab-content">
+                <h3>ACL权限管理</h3>
+                <div style="margin-bottom: 20px;">
+                    <input type="text" id="aclPath" placeholder="/path/to/node" style="width: 300px; padding: 10px;">
+                    <button class="btn btn-primary" onclick="getACL()">获取ACL</button>
+                </div>
+                
+                <div id="aclDetails">
+                    <!-- ACL详情将在这里显示 -->
+                </div>
+            </div>
+
+            <!-- 统计信息标签页 -->
+            <div id="tab-stats" class="tab-content">
+                <h3>集群统计</h3>
+                <button class="btn btn-primary" onclick="loadClusterStats()">加载统计</button>
+                <div id="clusterStats" style="margin-top: 20px;">
+                    <!-- 统计信息将在这里显示 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建节点模态框 -->
+    <div id="createModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('createModal')">&times;</span>
+            <h2>创建节点</h2>
+            <div style="margin: 20px 0;">
+                <label>路径:</label>
+                <input type="text" id="createPath" style="width: 100%; padding: 10px; margin: 10px 0;">
+                
+                <label>数据:</label>
+                <textarea id="createData" style="width: 100%; height: 100px; padding: 10px; margin: 10px 0;"></textarea>
+                
+                <label>节点类型:</label>
+                <select id="createMode" style="width: 100%; padding: 10px; margin: 10px 0;">
+                    <option value="persistent">持久节点</option>
+                    <option value="ephemeral">临时节点</option>
+                    <option value="sequential">顺序节点</option>
+                    <option value="ephemeral_sequential">临时顺序节点</option>
+                </select>
+            </div>
+            <button class="btn btn-success" onclick="createNode()">创建</button>
+        </div>
+    </div>
+
+    <script>
+        let currentPath = '/';
+        let currentData = '';
+
+        // 显示通知
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+
+        // 显示/隐藏标签页
+        function showTab(tabName) {
+            // 隐藏所有标签页
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // 显示选中的标签页
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            document.querySelectorAll('.tab')[['nodes', 'data', 'monitor', 'acl', 'stats'].indexOf(tabName)].classList.add('active');
+        }
+
+        // 连接ZooKeeper
+        async function connect() {
+            const servers = document.getElementById('servers').value.split(',').map(s => s.trim());
+            const timeout = document.getElementById('timeout').value || 5;
+            
+            const response = await fetch('/api/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ servers, timeout: parseInt(timeout) })
+            });
+            
+            const data = await response.json();
+            if (response.ok) {
+                showNotification('连接成功', 'success');
+                updateStatus(true);
+                loadNodeTree();
+            } else {
+                showNotification('连接失败: ' + data.error, 'error');
+            }
+        }
+
+        // 断开连接
+        async function disconnect() {
+            const response = await fetch('/api/disconnect', { method: 'POST' });
+            if (response.ok) {
+                showNotification('已断开连接', 'success');
+                updateStatus(false);
+            }
+        }
+
+        // 更新连接状态
+        async function updateStatus(force = null) {
+            const response = await fetch('/api/status');
+            const data = await response.json();
+            
+            const statusDiv = document.getElementById('status');
+            if (data.connected || force === true) {
+                statusDiv.textContent = `已连接到: ${data.servers.join(', ')}`;
+                statusDiv.className = 'status connected';
+            } else {
+                statusDiv.textContent = '未连接到ZooKeeper服务器';
+                statusDiv.className = 'status disconnected';
+            }
+        }
+
+        // 加载节点树
+        async function loadNodeTree(path = '/') {
+            if (!await checkConnection()) return;
+            
+            const response = await fetch(`/api/nodes?path=${encodeURIComponent(path)}`);
+            const data = await response.json();
+            
+            if (response.ok) {
+                const treeDiv = document.getElementById('nodeTree');
+                treeDiv.innerHTML = '';
+                
+                function renderNode(node, level = 0) {
+                    const indent = '&nbsp;&nbsp;'.repeat(level);
+                    const nodeDiv = document.createElement('div');
+                    nodeDiv.className = `node ${node.ephemeral ? 'node-ephemeral' : ''}`;
+                    nodeDiv.style.paddingLeft = (level * 20) + 'px';
+                    nodeDiv.innerHTML = `${indent}<i class="${node.ephemeral ? 'fas fa-bolt' : 'fas fa-folder'}"></i> ${node.name}`;
+                    nodeDiv.onclick = () => loadNode(node.path);
+                    treeDiv.appendChild(nodeDiv);
+                }
+                
+                // 添加根节点
+                const rootDiv = document.createElement('div');
+                rootDiv.className = 'node';
+                rootDiv.innerHTML = '<i class="fas fa-folder"></i> / (根节点)';
+                rootDiv.onclick = () => loadNode('/');
+                treeDiv.appendChild(rootDiv);
+                
+                // 添加子节点
+                data.nodes.forEach(node => {
+                    renderNode(node, 1);
+                });
+            }
+        }
+
+        // 加载节点详情
+        async function loadNode(path = null) {
+            if (!path) path = document.getElementById('nodePath').value || currentPath;
+            if (!path) path = '/';
+            
+            if (!await checkConnection()) return;
+            
+            currentPath = path;
+            document.getElementById('nodePath').value = path;
+            document.getElementById('dataPath').value = path;
+            document.getElementById('aclPath').value = path;
+            
+            const response = await fetch(`/api/node${path}`);
+            const data = await response.json();
+            
+            if (response.ok) {
+                const detailsDiv = document.getElementById('nodeDetails');
+                detailsDiv.innerHTML = `
+                    <h4>节点信息: ${path}</h4>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                        <p><strong>数据:</strong> ${data.data || '(空)'}</p>
+                        <p><strong>创建时间:</strong> ${data.stat.ctime}</p>
+                        <p><strong>修改时间:</strong> ${data.stat.mtime}</p>
+                        <p><strong>版本:</strong> ${data.stat.version}</p>
+                        <p><strong>子节点数量:</strong> ${data.stat.numChildren}</p>
+                        <p><strong>临时节点:</strong> ${data.stat.ephemeralOwner ? '是' : '否'}</p>
+                    </div>
+                    
+                    <h4 style="margin-top: 20px;">子节点 (${data.children.length}个):</h4>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                        ${data.children.map(child => `
+                            <div class="node" style="padding: 5px 15px; background: #e9ecef; border-radius: 15px;" 
+                                 onclick="loadNode('${path === '/' ? '' : path}/${child}')">
+                                ${child}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                
+                // 更新数据编辑器
+                document.getElementById('nodeData').value = data.data || '';
+                currentData = data.data || '';
+            } else {
+                showNotification('加载失败: ' + data.error, 'error');
+            }
+        }
+
+        // 加载节点数据
+        async function loadNodeData() {
+            const path = document.getElementById('dataPath').value;
+            if (path) {
+                await loadNode(path);
+            }
+        }
+
+        // 检查连接状态
+        async function checkConnection() {
+            const response = await fetch('/api/status');
+            const data = await response.json();
+            
+            if (!data.connected) {
+                showNotification('请先连接到ZooKeeper服务器', 'error');
+                return false;
+            }
+            return true;
+        }
+
+        // 在 JavaScript 部分添加 connectionStats 函数
+async function loadConnectionStats() {
+    const response = await fetch('/api/connection/stats');
+    if (response.ok) {
+        const data = await response.json();
+        const statsDiv = document.getElementById('connectionStats');
+        statsDiv.innerHTML = `
+            <strong>状态:</strong> ${data.connection.connected ? '已连接' : '未连接'}<br>
+            <strong>服务器:</strong> ${data.connection.servers.join(', ')}<br>
+            <strong>当前服务器:</strong> ${data.connection.current_server || 'N/A'}<br>
+            <strong>会话ID:</strong> ${data.connection.session_id || 'N/A'}<br>
+            <strong>会话超时:</strong> ${data.connection.session_timeout || 'N/A'}<br>
+            <strong>状态:</strong> ${data.connection.state || 'N/A'}<br>
+            <strong>超时设置:</strong> ${data.connection.timeout || 'N/A'}
+        `;
+    }
+}
+
+        // 创建节点
+        function showCreateModal() {
+            document.getElementById('createModal').style.display = 'block';
+        }
+
+        async function createNode() {
+            const path = document.getElementById('createPath').value;
+            const data = document.getElementById('createData').value;
+            const mode = document.getElementById('createMode').value;
+            
+            if (!path) {
+                showNotification('请输入节点路径', 'error');
+                return;
+            }
+            
+            const response = await fetch(`/api/node${path}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data, mode })
+            });
+            
+            const result = await response.json();
+            if (response.ok) {
+                showNotification('节点创建成功: ' + result.path, 'success');
+                closeModal('createModal');
+                loadNodeTree();
+                loadNode(path);
+            } else {
+                showNotification('创建失败: ' + result.error, 'error');
+            }
+        }
+
+        // 更新节点数据
+        async function updateNodeData() {
+            const path = document.getElementById('dataPath').value;
+            const data = document.getElementById('nodeData').value;
+            
+            if (!path) {
+                showNotification('请输入节点路径', 'error');
+                return;
+            }
+            
+            const response = await fetch(`/api/node${path}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data, version: -1 })
+            });
+            
+            const result = await response.json();
+            if (response.ok) {
+                showNotification('数据更新成功', 'success');
+                currentData = data;
+            } else {
+                showNotification('更新失败: ' + result.error, 'error');
+            }
+        }
+
+        // 删除节点
+        async function deleteNode() {
+            const path = document.getElementById('nodePath').value;
+            if (!path || path === '/') {
+                showNotification('不能删除根节点', 'error');
+                return;
+            }
+            
+            if (!confirm(`确定要删除节点 ${path} 吗？`)) return;
+            
+            const response = await fetch(`/api/node${path}`, {
+                method: 'DELETE'
+            });
+            
+            const result = await response.json();
+            if (response.ok) {
+                showNotification('节点删除成功', 'success');
+                loadNodeTree();
+                document.getElementById('nodeDetails').innerHTML = '';
+            } else {
+                showNotification('删除失败: ' + result.error, 'error');
+            }
+        }
+
+        // 监听节点
+        async function watchNode() {
+            const path = document.getElementById('dataPath').value;
+            if (!path) {
+                showNotification('请输入节点路径', 'error');
+                return;
+            }
+            
+            showNotification('开始监听节点变化...', 'info');
+            
+            const response = await fetch(`/api/watch${path}`);
+            const data = await response.json();
+            
+            if (response.ok) {
+                showNotification(`节点事件: ${data.event}`, 'info');
+            }
+        }
+
+        // 获取ACL
+        async function getACL() {
+            const path = document.getElementById('aclPath').value || '/';
+            
+            const response = await fetch(`/api/acl${path}`);
+            const data = await response.json();
+            
+            if (response.ok) {
+                const aclDiv = document.getElementById('aclDetails');
+                aclDiv.innerHTML = `
+                    <h4>${path} 的ACL权限</h4>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: #f8f9fa;">
+                                <th style="padding: 10px; border: 1px solid #ddd;">Scheme</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">ID</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">权限</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.acls.map(acl => `
+                                <tr>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">${acl.scheme}</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">${acl.id}</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">${acl.permsStr}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+        }
+
+        // 更新 refreshStats 函数
+async function refreshStats() {
+    await loadConnectionStats();
+    
+    // 获取节点统计
+    if (await checkConnection()) {
+        const response = await fetch('/api/stats');
+        if (response.ok) {
+            const data = await response.json();
+            document.getElementById('serverInfo').innerHTML = `
+                <strong>服务器:</strong> ${data.server}<br>
+                <strong>连接状态:</strong> ${data.connected ? '已连接' : '未连接'}
+            `;
+            
+            // 可以在这里添加更多的统计信息展示
+        }
+    }
+}
+
+        // 加载集群统计
+        async function loadClusterStats() {
+            const response = await fetch('/api/stats');
+            const data = await response.json();
+            
+            if (response.ok) {
+                const statsDiv = document.getElementById('clusterStats');
+                statsDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            }
+        }
+
+        // 关闭模态框
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        // 初始化
+        // 在 DOMContentLoaded 中添加定期更新
+document.addEventListener('DOMContentLoaded', () => {
+    updateStatus();
+    // 定期更新状态
+    setInterval(updateStatus, 5000);
+    // 定期更新统计
+    setInterval(refreshStats, 10000);
+});
+    </script>
+</body>
+</html>

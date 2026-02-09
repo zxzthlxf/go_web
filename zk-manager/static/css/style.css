@@ -1,0 +1,96 @@
+/* 主样式 */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    min-height: 100vh;
+}
+
+/* 卡片阴影增强 */
+.card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+}
+
+/* 按钮样式增强 */
+.btn {
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+/* 节点树样式 */
+.node-tree {
+    font-family: 'Consolas', monospace;
+}
+
+.node {
+    transition: background-color 0.2s ease;
+    border-left: 3px solid transparent;
+}
+
+.node:hover {
+    border-left-color: #667eea;
+}
+
+.node-ephemeral {
+    color: #e53e3e;
+    font-style: italic;
+}
+
+/* 表格样式 */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+}
+
+th, td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+th {
+    background-color: #f8f9fa;
+    font-weight: bold;
+}
+
+tr:hover {
+    background-color: #f5f5f5;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .container {
+        padding: 10px;
+    }
+    
+    .connection-form input {
+        width: 100% !important;
+        margin: 5px 0;
+    }
+    
+    .tab-container {
+        flex-direction: column;
+    }
+    
+    .tab {
+        text-align: center;
+        border-bottom: 1px solid #ddd;
+    }
+}

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kafka主题和消费者组信息查看</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .content {
+            padding: 20px;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        .btn-refresh {
+            background-color: #27ae60;
+        }
+        .btn-refresh:hover {
+            background-color: #219a52;
+        }
+        .btn-clear {
+            background-color: #e74c3c;
+        }
+        .btn-clear:hover {
+            background-color: #c0392b;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #ecf0f1;
+            font-weight: bold;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .topic-info {
+            background-color: #e8f4fd;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        .consumer-group-info {
+            background-color: #e8fcf2;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        .status-active {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .status-inactive {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #7f8c8d;
+        }
+        .error {
+            color: #e74c3c;
+            padding: 10px;
+            background-color: #fdeded;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            color: #27ae60;
+            padding: 10px;
+            background-color: #e8fcef;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Kafka主题和消费者组信息查看工具</h1>
+            <p>查看主题详情和消费者组状态</p>
+        </div>
+        
+        <div class="content">
+            <div class="controls">
+                <button class="btn btn-refresh" id="refreshBtn">刷新数据</button>
+                <button class="btn" id="showTopicsBtn">显示主题列表</button>
+                <button class="btn" id="showConsumerGroupsBtn">显示消费者组</button>
+                <button class="btn btn-clear" id="clearBtn">清空结果</button>
+            </div>
+            
+            <div id="messageArea"></div>
+            
+            <div id="resultContainer">
+                <!-- 结果将在这里显示 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 模拟Kafka数据
+        const mockData = {
+            topics: [
+                {
+                    name: 'user-events',
+                    partitions: 3,
+                    replicas: 1,
+                    messages: 12500,
+                    sizeMB: 45.2,
+                    createdAt: '2023-05-15 10:30:00',
+                    status: 'active'
+                },
+                {
+                    name: 'order-updates',
+                    partitions: 5,
+                    replicas: 2,
+                    messages: 8900,
+                    sizeMB: 32.1,
+                    createdAt: '2023-06-20 14:22:00',
+                    status: 'active'
+                },
+                {
+                    name: 'payment-notifications',
+                    partitions: 2,
+                    replicas: 1,
+                    messages: 5600,
+                    sizeMB: 18.7,
+                    createdAt: '2023-07-10 09:15:00',
+                    status: 'inactive'
+                },
+                {
+                    name: 'log-stream',
+                    partitions: 8,
+                    replicas: 3,
+                    messages: 156000,
+                    sizeMB: 234.5,
+                    createdAt: '2023-04-01 08:00:00',
+                    status: 'active'
+                }
+            ],
+            consumerGroups: [
+                {
+                    groupId: 'user-service-consumer',
+                    coordinator: 'broker-1',
+                    state: 'Stable',
+                    protocol: 'range',
+                    members: 3,
+                    topics: ['user-events'],
+                    totalLag: 0,
+                    lastHeartbeat: '2023-08-15 14:30:22'
+                },
+                {
+                    groupId: 'order-processing-group',
+                    coordinator: 'broker-2',
+                    state: 'Stable',
+                    protocol: 'roundrobin',
+                    members: 5,
+                    topics: ['order-updates', 'payment-notifications'],
+                    totalLag: 120,
+                    lastHeartbeat: '2023-08-15 14:30:18'
+                },
+                {
+                    groupId: 'analytics-worker',
+                    coordinator: 'broker-1',
+                    state: 'Empty',
+                    protocol: 'range',
+                    members: 0,
+                    topics: ['user-events', 'log-stream'],
+                    totalLag: 0,
+                    lastHeartbeat: '2023-08-15 10:15:30'
+                },
+                {
+                    groupId: 'notification-service',
+                    coordinator: 'broker-3',
+                    state: 'Stable',
+                    protocol: 'range',
+                    members: 2,
+                    topics: ['payment-notifications'],
+                    totalLag: 0,
+                    lastHeartbeat: '2023-08-15 14:30:25'
+                }
+            ],
+            topicDetails: {
+                'user-events': [
+                    { partition: 0, leader: 1, replicas: [1, 2], isr: [1, 2], messages: 4200, lag: 0, consumerGroup: 'user-service-consumer' },
+                    { partition: 1, leader: 2, replicas: [2, 1], isr: [2, 1], messages: 4150, lag: 0, consumerGroup: 'user-service-consumer' },
+                    { partition: 2, leader: 1, replicas: [1, 2], isr: [1, 2], messages: 4150, lag: 0, consumerGroup: 'user-service-consumer' }
+                ],
+                'order-updates': [
+                    { partition: 0, leader: 1, replicas: [1, 2, 3], isr: [1, 2, 3], messages: 1800, lag: 0, consumerGroup: 'order-processing-group' },
+                    { partition: 1, leader: 2, replicas: [2, 3, 1], isr: [2, 3, 1], messages: 1750, lag: 0, consumerGroup: 'order-processing-group' },
+                    { partition: 2, leader: 3, replicas: [3, 1, 2], isr: [3, 1, 2], messages: 1800, lag: 0, consumerGroup: 'order-processing-group' },
+                    { partition: 3, leader: 1, replicas: [1, 2, 3], isr: [1, 2, 3], messages: 1780, lag: 20, consumerGroup: 'order-processing-group' },
+                    { partition: 4, leader: 2, replicas: [2, 3, 1], isr: [2, 3, 1], messages: 1770, lag: 100, consumerGroup: 'order-processing-group' }
+                ]
+            }
+        };
+
+        // DOM元素引用
+        const refreshBtn = document.getElementById('refreshBtn');
+        const showTopicsBtn = document.getElementById('showTopicsBtn');
+        const showConsumerGroupsBtn = document.getElementById('showConsumerGroupsBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const resultContainer = document.getElementById('resultContainer');
+        const messageArea = document.getElementById('messageArea');
+
+        // 显示消息
+        function showMessage(text, type = 'info') {
+            messageArea.innerHTML = `<div class="${type}">${text}</div>`;
+            setTimeout(() => {
+                messageArea.innerHTML = '';
+            }, 3000);
+        }
+
+        // 显示加载状态
+        function showLoading() {
+            resultContainer.innerHTML = '<div class="loading">正在加载数据...</div>';
+        }
+
+        // 显示主题列表
+        function showTopics() {
+            showLoading();
+            
+            setTimeout(() => {
+                let html = `
+                    <div class="topic-info">
+                        <h2>主题列表 (${mockData.topics.length} 个主题)</h2>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>主题名称</th>
+                                    <th>分区数</th>
+                                    <th>副本数</th>
+                                    <th>消息数</th>
+                                    <th>大小(MB)</th>
+                                    <th>创建时间</th>
+                                    <th>状态</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                
+                mockData.topics.forEach(topic => {
+                    html += `
+                        <tr>
+                            <td><strong>${topic.name}</strong></td>
+                            <td>${topic.partitions}</td>
+                            <td>${topic.replicas}</td>
+                            <td>${topic.messages.toLocaleString()}</td>
+                            <td>${topic.sizeMB}</td>
+                            <td>${topic.createdAt}</td>
+                            <td><span class="status-${topic.status}">${topic.status}</span></td>
+                            <td>
+                                <button class="btn" onclick="showTopicDetails('${topic.name}')">查看详情</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+                
+                resultContainer.innerHTML = html;
+                showMessage('主题列表加载完成', 'success');
+            }, 500);
+        }
+
+        // 显示消费者组列表
+        function showConsumerGroups() {
+            showLoading();
+            
+            setTimeout(() => {
+                let html = `
+                    <div class="consumer-group-info">
+                        <h2>消费者组列表 (${mockData.consumerGroups.length} 个消费者组)</h2>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>消费者组ID</th>
+                                    <th>协调器</th>
+                                    <th>状态</th>
+                                    <th>协议</th>
+                                    <th>成员数</th>
+                                    <th>订阅主题</th>
+                                    <th>总延迟</th>
+                                    <th>最后心跳</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                
+                mockData.consumerGroups.forEach(group => {
+                    html += `
+                        <tr>
+                            <td><strong>${group.groupId}</strong></td>
+                            <td>${group.coordinator}</td>
+                            <td><span class="status-${group.state.toLowerCase()}">${group.state}</span></td>
+                            <td>${group.protocol}</td>
+                            <td>${group.members}</td>
+                            <td>${group.topics.join(', ')}</td>
+                            <td>${group.totalLag}</td>
+                            <td>${group.lastHeartbeat}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+                
+                resultContainer.innerHTML = html;
+                showMessage('消费者组列表加载完成', 'success');
+            }, 500);
+        }
+
+        // 显示主题详细信息
+        function showTopicDetails(topicName) {
+            showLoading();
+            
+            setTimeout(() => {
+                const topic = mockData.topics.find(t => t.name === topicName);
+                if (!topic) {
+                    showMessage(`主题 ${topicName} 不存在`, 'error');
+                    return;
+                }
+                
+                const details = mockData.topicDetails[topicName];
+                if (!details) {
+                    showMessage(`主题 ${topicName} 的详细信息不可用`, 'error');
+                    return;
+                }
+                
+                let html = `
+                    <div class="topic-info">
+                        <h2>主题详情: ${topicName}</h2>
+                        <p><strong>分区数:</strong> ${topic.partitions} | 
+                           <strong>副本数:</strong> ${topic.replicas} | 
+                           <strong>消息数:</strong> ${topic.messages.toLocaleString()} | 
+                           <strong>大小:</strong> ${topic.sizeMB} MB</p>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>分区</th>
+                                    <th>Leader</th>
+                                    <th>副本</th>
+                                    <th>ISR</th>
+                                    <th>消息数</th>
+                                    <th>延迟</th>
+                                    <th>消费者组</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                
+                details.forEach(partition => {
+                    html += `
+                        <tr>
+                            <td><strong>P${partition.partition}</strong></td>
+                            <td>${partition.leader}</td>
+                            <td>[${partition.replicas.join(', ')}]</td>
+                            <td>[${partition.isr.join(', ')}]</td>
+                            <td>${partition.messages.toLocaleString()}</td>
+                            <td>${partition.lag}</td>
+                            <td>${partition.consumerGroup || '-'}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div style="margin-top: 20px;">
+                        <button class="btn" onclick="showTopics()">返回主题列表</button>
+                    </div>
+                `;
+                
+                resultContainer.innerHTML = html;
+                showMessage(`主题 ${topicName} 详细信息加载完成`, 'success');
+            }, 500);
+        }
+
+        // 刷新数据
+        function refreshData() {
+            showMessage('正在刷新数据...', 'info');
+            // 在实际应用中，这里会调用API获取最新数据
+            setTimeout(() => {
+                showMessage('数据已刷新', 'success');
+            }, 1000);
+        }
+
+        // 清空结果
+        function clearResults() {
+            resultContainer.innerHTML = '';
+            messageArea.innerHTML = '';
+        }
+
+        // 事件监听器
+        refreshBtn.addEventListener('click', refreshData);
+        showTopicsBtn.addEventListener('click', showTopics);
+        showConsumerGroupsBtn.addEventListener('click', showConsumerGroups);
+        clearBtn.addEventListener('click', clearResults);
+
+        // 初始化显示主题列表
+        window.onload = function() {
+            showTopics();
+        };
+
+        // 将函数暴露到全局作用域以便在内联事件处理器中使用
+        window.showTopicDetails = showTopicDetails;
+        window.showTopics = showTopics;
+    </script>
+</body>
+</html>
