@@ -1,6 +1,8 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -11,6 +13,15 @@ import (
 )
 
 func main() {
+	var port int
+	flag.IntVar(&port, "port", 8012, "web service port")
+	flag.Parse()
+
+	if port < 1 || port > 65535 {
+		log.Fatalf("invalid port: %d", port)
+	}
+
+	gin.SetMode(gin.ReleaseMode)
 	// 初始化Gin
 	r := gin.Default()
 
@@ -28,9 +39,14 @@ func main() {
 	registerRoutes(r, zkClient)
 
 	// 启动服务器
-	log.Println("ZooKeeper管理工具启动在 http://localhost:8080")
-	if err := r.Run(":8080"); err != nil {
-		log.Fatal("启动失败:", err)
+
+	listenAddr := fmt.Sprintf(":%d", port)
+	log.Printf("ZooKeeper Web管理工具启动成功！")
+	log.Printf("监听端口: %d", port)
+	log.Printf("访问地址: http://localhost:%d", port)
+
+	if err := r.Run(listenAddr); err != nil {
+		log.Fatalf("服务启动失败: %v", err)
 	}
 }
 
