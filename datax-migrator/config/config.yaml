@@ -1,0 +1,51 @@
+server:
+  port: 8080
+  mode: debug
+  
+database:
+  path: "data/migrator.db"
+  
+datax:
+  path: "/opt/datax"
+  job_path: "data/jobs"
+  log_path: "logs/datax"
+  python_path: "python3"
+  
+log:
+  path: "logs"
+  level: "info"
+  
+security:
+  secret_key: "datax-migrator-secret-key-2023"
+  token_expire: 7200  # 2小时
+  
+limits:
+  max_workers: 5
+  max_connections: 100
+  query_timeout: 30
+  
+supported_databases:
+  mysql:
+    reader: "mysqlreader"
+    writer: "mysqlwriter"
+  oracle:
+    reader: "oraclereader"
+    writer: "oraclewriter"
+  postgresql:
+    reader: "postgresqlreader"
+    writer: "postgresqlwriter"
+  sqlserver:
+    reader: "sqlserverreader"
+    writer: "sqlserverwriter"
+  hdfs:
+    reader: "hdfsreader"
+    writer: "hdfswriter"
+  hive:
+    reader: "hdfsreader"
+    writer: "hivewriter"
+  elasticsearch:
+    reader: "elasticsearchreader"
+    writer: "elasticsearchwriter"
+  mongodb:
+    reader: "mongodbreader"
+    writer: "mongodbwriter"
