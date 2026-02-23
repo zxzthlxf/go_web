@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -414,89 +415,132 @@ func (s *DataXService) ExecuteJob(job *models.MigrationJob) (*models.MigrationTa
 
 // runDataXJob 执行DataX作业
 func (s *DataXService) runDataXJob(job *models.MigrationJob, task *models.MigrationTask) {
-	// 更新状态为运行中
+	// 使用 defer 捕获 panic，确保状态能够更新
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("runDataXJob panic: %v", r)
+			task.Status = models.TaskStatusFailed
+			task.ErrorMessage = fmt.Sprintf("内部错误: %v", r)
+			now := time.Now()
+			task.EndTime = &now
+			if s.db != nil {
+				s.db.Save(task)
+			}
+		}
+	}()
+
+	// 1. 更新状态为运行中
 	task.Status = models.TaskStatusRunning
 	startTime := time.Now()
 	task.StartTime = &startTime
-
 	if s.db != nil {
-		s.db.Save(task)
+		if err := s.db.Save(task).Error; err != nil {
+			log.Printf("保存任务运行状态失败: %v", err)
+		}
 	}
 
-	// 构建命令
-	command := fmt.Sprintf("%s %s/bin/datax.py %s", s.pythonPath, s.basePath, task.ConfigFile)
-	task.Command = command
+	// 2. 构建命令（跨平台）
+	var cmd *exec.Cmd
+	var commandLine string
 
-	// 执行命令
-	cmd := exec.Command("bash", "-c", command)
+	if runtime.GOOS == "windows" {
+		// Windows 使用 cmd /c
+		commandLine = fmt.Sprintf("%s %s\\bin\\datax.py %s", s.pythonPath, s.basePath, task.ConfigFile)
+		cmd = exec.Command("cmd", "/c", commandLine)
+	} else {
+		// Linux/Mac 使用 bash -c
+		commandLine = fmt.Sprintf("%s %s/bin/datax.py %s", s.pythonPath, s.basePath, task.ConfigFile)
+		cmd = exec.Command("bash", "-c", commandLine)
+	}
 
-	// 设置输出
+	task.Command = strings.Join(cmd.Args, " ")
+	log.Printf("执行命令: %s", task.Command)
+
+	// 3. 设置输出捕获
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// 开始执行
+	// 4. 执行命令
 	err := cmd.Run()
 	duration := time.Since(startTime)
 
-	// 更新任务状态
-	task.Duration = duration.Milliseconds() // 毫秒
+	// 5. 更新任务状态和结果
+	task.Duration = duration.Milliseconds()
 	endTime := time.Now()
 	task.EndTime = &endTime
 	task.Output = stdout.String()
+	task.ErrorDetails = stderr.String()
 
 	if err != nil {
 		task.Status = models.TaskStatusFailed
 		task.ErrorMessage = err.Error()
-		task.ErrorDetails = stderr.String()
+		log.Printf("命令执行失败: %v, stderr: %s", err, stderr.String())
 	} else {
 		task.Status = models.TaskStatusSuccess
-		// 解析输出，提取统计信息
+		// 解析 DataX 输出，提取统计信息
 		s.parseDataXOutput(stdout.String(), task)
 	}
 
-	// 保存更新
+	// 6. 保存任务更新
 	if s.db != nil {
-		s.db.Save(task)
+		if err := s.db.Save(task).Error; err != nil {
+			log.Printf("保存任务最终状态失败: %v", err)
+		}
 	}
 
-	// 更新作业状态
+	// 7. 更新作业的总体状态
 	if s.db != nil {
 		job.Status = models.JobStatusCompleted
 		if task.Status == models.TaskStatusFailed {
 			job.Status = models.JobStatusFailed
+		} else if task.Status == models.TaskStatusSuccess {
+			job.Status = models.JobStatusCompleted
 		}
-		job.EndTime = task.EndTime
-		// 关键修正：将 float64 转换为 int64
+		job.EndTime = &endTime
 		job.Duration = int64(duration.Seconds())
-		s.db.Save(job)
+		if err := s.db.Save(job).Error; err != nil {
+			log.Printf("保存作业状态失败: %v", err)
+		}
 	}
 }
 
 // parseDataXOutput 解析DataX输出
 func (s *DataXService) parseDataXOutput(output string, task *models.MigrationTask) {
-	// 解析DataX的标准输出格式
+	// 示例：简单提取记录数
 	lines := strings.Split(output, "\n")
-
 	for _, line := range lines {
+		if strings.Contains(line, "任务启动时刻") {
+			// 可以记录日志
+			if s.db != nil {
+				s.db.Create(&models.TaskLog{
+					TaskID:    task.ID,
+					Level:     "INFO",
+					Message:   line,
+					Timestamp: time.Now(),
+				})
+			}
+		}
+		if strings.Contains(line, "任务结束时刻") {
+			// 解析结束时间
+		}
 		if strings.Contains(line, "任务总计") {
-			// 解析统计信息
-			// 示例: "任务总计                  :                 1000          |         1000          |"
+			// 尝试解析记录数
+			// 示例： "任务总计                 | 1000 | 1000 |"
+			// 简化处理，您需要根据实际输出格式调整
 			parts := strings.Split(line, "|")
 			if len(parts) >= 2 {
 				// 这里简化解析，实际需要更复杂的解析逻辑
 				task.ReadRecords = 1000  // 简化
 				task.WriteRecords = 1000 // 简化
 			}
-		} else if strings.Contains(line, "任务结束时刻") {
-			// 解析结束时间
 		}
-	}
+		// 计算速度
+		if task.Duration > 0 {
+			task.ReadSpeed = float64(task.ReadRecords) / (float64(task.Duration) / 1000.0)
+			task.WriteSpeed = float64(task.WriteRecords) / (float64(task.Duration) / 1000.0)
+		}
 
-	// 计算速度
-	if task.Duration > 0 {
-		task.ReadSpeed = float64(task.ReadRecords) / (float64(task.Duration) / 1000.0)
-		task.WriteSpeed = float64(task.WriteRecords) / (float64(task.Duration) / 1000.0)
 	}
 }
 

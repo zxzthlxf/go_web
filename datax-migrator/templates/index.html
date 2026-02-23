@@ -1246,6 +1246,16 @@
                 showError('请填写必填字段');
                 return;
             }
+
+            // 将端口转为整数
+            data.port = parseInt(data.port, 10);
+            
+            // 如果 extra 字段是对象，转为 JSON 字符串（一般不会发生，但保持兼容）
+            if (data.extra && typeof data.extra === 'object') {
+                data.extra = JSON.stringify(data.extra);
+            }
+            
+            console.log('测试连接发送数据:', data); // 调试输出
             
             // 发送测试请求到后端
             try {
@@ -1789,6 +1799,13 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
         async function runJob(jobId) {
             if (!jobId) jobId = currentJobId;
             if (!jobId) return;
+
+                // ... 执行任务
+            if (response.ok) {
+                showSuccess('任务开始执行');
+                // 启动轮询
+                pollJobStatus(jobId);
+            }
             
             try {
                 const response = await fetch(`/api/v1/jobs/${jobId}/run`, {
@@ -1811,6 +1828,22 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
             } catch (error) {
                 showError('任务执行失败');
             }
+        }
+
+        // 轮询任务状态
+        function pollJobStatus(jobId) {
+            const interval = setInterval(async () => {
+                const response = await fetch(`/api/v1/jobs/${jobId}`);
+                const data = await response.json();
+                const job = data.job;
+                // 更新任务列表中的进度
+                updateJobRow(job);
+                
+                // 如果任务状态是终态（completed/failed/stopped），停止轮询
+                if (['completed', 'failed', 'stopped'].includes(job.status)) {
+                    clearInterval(interval);
+                }
+            }, 3000); // 每3秒查询一次
         }
         
         // 停止任务
