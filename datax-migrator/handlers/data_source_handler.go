@@ -24,6 +24,8 @@ func CreateDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 			return
 		}
 
+		// 返回前清除密码
+		ds.Password = ""
 		c.JSON(http.StatusCreated, gin.H{
 			"message":     "数据源创建成功",
 			"data_source": ds,
@@ -35,7 +37,7 @@ func CreateDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 func UpdateDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-		if err != nil {
+		if err != nil || id == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的数据源ID"})
 			return
 		}
@@ -52,6 +54,8 @@ func UpdateDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 			return
 		}
 
+		// 返回前清除密码
+		ds.Password = ""
 		c.JSON(http.StatusOK, gin.H{
 			"message":     "数据源更新成功",
 			"data_source": ds,
@@ -63,7 +67,7 @@ func UpdateDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 func DeleteDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-		if err != nil {
+		if err != nil || id == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的数据源ID"})
 			return
 		}
@@ -73,9 +77,7 @@ func DeleteDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"message": "数据源删除成功",
-		})
+		c.JSON(http.StatusOK, gin.H{"message": "数据源删除成功"})
 	}
 }
 
@@ -83,7 +85,7 @@ func DeleteDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 func GetDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-		if err != nil {
+		if err != nil || id == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的数据源ID"})
 			return
 		}
@@ -94,9 +96,9 @@ func GetDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"data_source": ds,
-		})
+		// 返回前清除密码
+		ds.Password = ""
+		c.JSON(http.StatusOK, gin.H{"data_source": ds})
 	}
 }
 
@@ -109,6 +111,11 @@ func ListDataSources(dsService *services.DataSourceService) gin.HandlerFunc {
 			return
 		}
 
+		// 清除所有数据源的密码
+		for i := range dataSources {
+			dataSources[i].Password = ""
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"data_sources": dataSources,
 			"total":        len(dataSources),
@@ -116,11 +123,11 @@ func ListDataSources(dsService *services.DataSourceService) gin.HandlerFunc {
 	}
 }
 
-// TestDataSource 测试数据源连接
+// TestDataSource 测试数据源连接（基于已保存的数据源）
 func TestDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-		if err != nil {
+		if err != nil || id == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的数据源ID"})
 			return
 		}
@@ -146,7 +153,7 @@ func TestDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 	}
 }
 
-// TestDataSourceConnection 测试数据源连接（无需保存）
+// TestDataSourceConnection 测试数据源连接（无需保存，基于表单提交的数据）
 func TestDataSourceConnection(dsService *services.DataSourceService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var ds models.DataSource
@@ -154,6 +161,7 @@ func TestDataSourceConnection(dsService *services.DataSourceService) gin.Handler
 			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误", "details": err.Error()})
 			return
 		}
+
 		// 测试连接
 		err := dsService.TestDataSource(&ds)
 		if err != nil {
@@ -164,11 +172,11 @@ func TestDataSourceConnection(dsService *services.DataSourceService) gin.Handler
 	}
 }
 
-// GetDatabaseTables 获取数据库表列表
+// GetDatabaseTables 获取指定数据源的所有表
 func GetDatabaseTables(dsService *services.DataSourceService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		dataSourceID, err := strconv.ParseUint(c.Query("data_source_id"), 10, 32)
-		if err != nil {
+		if err != nil || dataSourceID == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的数据源ID"})
 			return
 		}
@@ -179,17 +187,15 @@ func GetDatabaseTables(dsService *services.DataSourceService) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"tables": tables,
-		})
+		c.JSON(http.StatusOK, gin.H{"tables": tables})
 	}
 }
 
-// GetTableColumns 获取表字段信息
+// GetTableColumns 获取指定表的字段信息
 func GetTableColumns(dsService *services.DataSourceService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		dataSourceID, err := strconv.ParseUint(c.Query("data_source_id"), 10, 32)
-		if err != nil {
+		if err != nil || dataSourceID == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的数据源ID"})
 			return
 		}
@@ -206,13 +212,11 @@ func GetTableColumns(dsService *services.DataSourceService) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"columns": columns,
-		})
+		c.JSON(http.StatusOK, gin.H{"columns": columns})
 	}
 }
 
-// ExecuteQuery 执行SQL查询
+// ExecuteQuery 执行SQL查询（用于数据预览）
 func ExecuteQuery(dsService *services.DataSourceService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
@@ -222,7 +226,7 @@ func ExecuteQuery(dsService *services.DataSourceService) gin.HandlerFunc {
 		}
 
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误", "details": err.Error()})
 			return
 		}
 
@@ -230,7 +234,10 @@ func ExecuteQuery(dsService *services.DataSourceService) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "查询语句不能为空"})
 			return
 		}
-
+		if req.DataSourceID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的数据源ID"})
+			return
+		}
 		if req.Limit <= 0 {
 			req.Limit = 100
 		}

@@ -25,11 +25,15 @@ func initConfig() {
 	viper.AddConfigPath("./config")
 
 	// 设置默认配置
-	viper.SetDefault("server.port", "8080")
+	viper.SetDefault("server.port", "8015") // 修改默认端口为 8015
 	viper.SetDefault("datax.path", "/home/koca/datax")
 	viper.SetDefault("database.path", "data/migrator.db")
 	viper.SetDefault("log.path", "logs")
 	viper.SetDefault("max_workers", 5)
+
+	// 支持环境变量覆盖
+	viper.AutomaticEnv()
+	viper.SetEnvPrefix("DATAX") // 环境变量前缀，如 DATAX_SERVER_PORT
 
 	if err := viper.ReadInConfig(); err != nil {
 		log.Printf("配置文件读取失败，使用默认配置: %v", err)

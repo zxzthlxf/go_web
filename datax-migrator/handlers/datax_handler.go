@@ -16,10 +16,7 @@ func GetReaderPlugins(dataxService *services.DataXService) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"plugins": plugins,
-		})
+		c.JSON(http.StatusOK, gin.H{"plugins": plugins})
 	}
 }
 
@@ -31,14 +28,12 @@ func GetWriterPlugins(dataxService *services.DataXService) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"plugins": plugins,
-		})
+		c.JSON(http.StatusOK, gin.H{"plugins": plugins})
 	}
 }
 
-// GenerateDataXConfig 生成DataX配置
+// GenerateDataXConfig 生成DataX配置（未实现）
+// 该接口需要完整的任务信息，请通过创建任务功能自动生成配置。
 func GenerateDataXConfig(dataxService *services.DataXService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
@@ -50,14 +45,14 @@ func GenerateDataXConfig(dataxService *services.DataXService) gin.HandlerFunc {
 		}
 
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误", "details": err.Error()})
 			return
 		}
 
-		// 这里简化处理，实际应该根据参数生成配置
-		c.JSON(http.StatusOK, gin.H{
-			"message": "配置生成功能需要完整的任务信息",
-			"config":  nil,
+		// 该接口尚未实现，返回 501 状态码
+		c.JSON(http.StatusNotImplemented, gin.H{
+			"error":   "配置生成接口未实现",
+			"message": "请通过创建任务功能自动生成DataX配置",
 		})
 	}
 }
@@ -70,12 +65,16 @@ func ValidateDataXConfig(dataxService *services.DataXService) gin.HandlerFunc {
 		}
 
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误", "details": err.Error()})
+			return
+		}
+
+		if req.Config == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "配置不能为空"})
 			return
 		}
 
 		valid, message := dataxService.ValidateConfig(req.Config)
-
 		c.JSON(http.StatusOK, gin.H{
 			"valid":   valid,
 			"message": message,

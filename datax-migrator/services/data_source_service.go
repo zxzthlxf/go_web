@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -90,35 +91,7 @@ func (s *DataSourceService) TestDataSource(ds *models.DataSource) error {
 
 // testConnection 测试数据库连接
 func (s *DataSourceService) testConnection(ds *models.DataSource) error {
-	var db *sql.DB
-	var err error
-
-	switch ds.Type {
-	case models.MySQL:
-		connStr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
-			ds.Username, ds.Password, ds.Host, ds.Port, ds.Database, ds.Charset)
-		db, err = sql.Open("mysql", connStr)
-
-	case models.PostgreSQL:
-		connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-			ds.Username, ds.Password, ds.Host, ds.Port, ds.Database)
-		db, err = sql.Open("postgres", connStr)
-
-	case models.Oracle:
-		connStr := fmt.Sprintf("oracle://%s:%s@%s:%d/%s",
-			ds.Username, ds.Password, ds.Host, ds.Port, ds.Database)
-		db, err = sql.Open("oracle", connStr)
-
-	case models.SQLServer:
-		// SQL Server连接字符串
-		connStr := fmt.Sprintf("server=%s;port=%d;database=%s;user id=%s;password=%s",
-			ds.Host, ds.Port, ds.Database, ds.Username, ds.Password)
-		db, err = sql.Open("sqlserver", connStr)
-
-	default:
-		return fmt.Errorf("不支持的数据库类型: %s", ds.Type)
-	}
-
+	db, err := s.openDB(ds)
 	if err != nil {
 		return err
 	}
@@ -131,6 +104,70 @@ func (s *DataSourceService) testConnection(ds *models.DataSource) error {
 	return db.Ping()
 }
 
+// openDB 根据数据源类型打开数据库连接
+func (s *DataSourceService) openDB(ds *models.DataSource) (*sql.DB, error) {
+	var driverName, connStr string
+	var err error
+
+	switch ds.Type {
+	case models.MySQL:
+		driverName = "mysql"
+		connStr, err = s.buildMySQLConnStr(ds)
+	case models.PostgreSQL:
+		driverName = "postgres"
+		connStr, err = s.buildPostgreSQLConnStr(ds)
+	case models.Oracle:
+		driverName = "oracle"
+		connStr, err = s.buildOracleConnStr(ds)
+	case models.SQLServer:
+		driverName = "sqlserver"
+		connStr, err = s.buildSQLServerConnStr(ds)
+	default:
+		return nil, fmt.Errorf("不支持的数据库类型: %s", ds.Type)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return sql.Open(driverName, connStr)
+}
+
+// buildMySQLConnStr 构建 MySQL 连接字符串（对密码进行编码）
+func (s *DataSourceService) buildMySQLConnStr(ds *models.DataSource) (string, error) {
+	// 对密码进行 URL 编码，避免特殊字符破坏 DSN
+	encodedPassword := url.QueryEscape(ds.Password)
+	connStr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
+		ds.Username, encodedPassword, ds.Host, ds.Port, ds.Database, ds.Charset)
+	return connStr, nil
+}
+
+// buildPostgreSQLConnStr 构建 PostgreSQL 连接字符串
+func (s *DataSourceService) buildPostgreSQLConnStr(ds *models.DataSource) (string, error) {
+	encodedPassword := url.QueryEscape(ds.Password)
+	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+		ds.Username, encodedPassword, ds.Host, ds.Port, ds.Database)
+	return connStr, nil
+}
+
+// buildOracleConnStr 构建 Oracle 连接字符串
+func (s *DataSourceService) buildOracleConnStr(ds *models.DataSource) (string, error) {
+	// go-ora 驱动密码不需要编码，但为了安全，可以编码
+	encodedPassword := url.QueryEscape(ds.Password)
+	connStr := fmt.Sprintf("oracle://%s:%s@%s:%d/%s",
+		ds.Username, encodedPassword, ds.Host, ds.Port, ds.Database)
+	return connStr, nil
+}
+
+// buildSQLServerConnStr 构建 SQL Server 连接字符串
+func (s *DataSourceService) buildSQLServerConnStr(ds *models.DataSource) (string, error) {
+	// SQL Server 连接字符串中的密码需要特殊处理：如果包含 ; 等字符可能导致问题，但一般不会
+	// 这里简单拼接，如果有问题可考虑使用 url.Values 构建
+	connStr := fmt.Sprintf("server=%s;port=%d;database=%s;user id=%s;password=%s",
+		ds.Host, ds.Port, ds.Database, ds.Username, ds.Password)
+	return connStr, nil
+}
+
 // GetDatabaseTables 获取数据库表列表
 func (s *DataSourceService) GetDatabaseTables(dataSourceID uint) ([]string, error) {
 	ds, err := s.GetDataSource(dataSourceID)
@@ -138,30 +175,25 @@ func (s *DataSourceService) GetDatabaseTables(dataSourceID uint) ([]string, erro
 		return nil, err
 	}
 
-	var db *sql.DB
-	var query string
-
-	switch ds.Type {
-	case models.MySQL:
-		db, err = s.connectMySQL(ds)
-		query = "SHOW TABLES"
-	case models.PostgreSQL:
-		db, err = s.connectPostgreSQL(ds)
-		query = "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-	case models.Oracle:
-		db, err = s.connectOracle(ds)
-		query = "SELECT table_name FROM user_tables"
-	case models.SQLServer:
-		db, err = s.connectSQLServer(ds)
-		query = "SELECT name FROM sys.tables"
-	default:
-		return nil, fmt.Errorf("不支持的数据库类型")
-	}
-
+	db, err := s.openDB(ds)
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
+
+	var query string
+	switch ds.Type {
+	case models.MySQL:
+		query = "SHOW TABLES"
+	case models.PostgreSQL:
+		query = "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+	case models.Oracle:
+		query = "SELECT table_name FROM user_tables"
+	case models.SQLServer:
+		query = "SELECT name FROM sys.tables"
+	default:
+		return nil, fmt.Errorf("不支持的数据库类型")
+	}
 
 	rows, err := db.Query(query)
 	if err != nil {
@@ -176,8 +208,7 @@ func (s *DataSourceService) GetDatabaseTables(dataSourceID uint) ([]string, erro
 			tables = append(tables, table)
 		}
 	}
-
-	return tables, nil
+	return tables, rows.Err()
 }
 
 // GetTableColumns 获取表字段信息
@@ -187,21 +218,59 @@ func (s *DataSourceService) GetTableColumns(dataSourceID uint, tableName string)
 		return nil, err
 	}
 
-	var db *sql.DB
+	db, err := s.openDB(ds)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	var rows *sql.Rows
 	var query string
+	var args []interface{}
 
 	switch ds.Type {
 	case models.MySQL:
-		db, err = s.connectMySQL(ds)
-		query = fmt.Sprintf("DESCRIBE %s", tableName)
+		// 使用 INFORMATION_SCHEMA 避免直接拼接表名
+		query = `
+			SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA
+			FROM INFORMATION_SCHEMA.COLUMNS
+			WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+			ORDER BY ORDINAL_POSITION
+		`
+		args = []interface{}{ds.Database, tableName}
+		rows, err = db.Query(query, args...)
+
 	case models.PostgreSQL:
-		db, err = s.connectPostgreSQL(ds)
-		query = fmt.Sprintf(`
+		query = `
 			SELECT column_name, data_type, is_nullable, column_default
 			FROM information_schema.columns
-			WHERE table_name = '%s'
+			WHERE table_schema = 'public' AND table_name = $1
 			ORDER BY ordinal_position
-		`, tableName)
+		`
+		args = []interface{}{tableName}
+		rows, err = db.Query(query, args...)
+
+	case models.Oracle:
+		// Oracle 类似，使用 ALL_TAB_COLUMNS
+		query = `
+			SELECT COLUMN_NAME, DATA_TYPE, NULLABLE, DATA_DEFAULT
+			FROM ALL_TAB_COLUMNS
+			WHERE OWNER = UPPER(?) AND TABLE_NAME = UPPER(?)
+			ORDER BY COLUMN_ID
+		`
+		args = []interface{}{ds.Username, tableName}
+		rows, err = db.Query(query, args...)
+
+	case models.SQLServer:
+		query = `
+			SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+			FROM INFORMATION_SCHEMA.COLUMNS
+			WHERE TABLE_NAME = @p1
+			ORDER BY ORDINAL_POSITION
+		`
+		args = []interface{}{tableName}
+		rows, err = db.Query(query, args...)
+
 	default:
 		return nil, fmt.Errorf("暂不支持该数据库类型的字段查询")
 	}
@@ -209,45 +278,62 @@ func (s *DataSourceService) GetTableColumns(dataSourceID uint, tableName string)
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
-
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, err
-	}
 	defer rows.Close()
 
 	columns := make([]map[string]interface{}, 0)
-
 	for rows.Next() {
 		switch ds.Type {
 		case models.MySQL:
-			var field, typeStr, null, key, extra string
+			var name, dataType, isNullable, columnKey, extra string
 			var defaultValue sql.NullString
-			if err := rows.Scan(&field, &typeStr, &null, &key, &defaultValue, &extra); err == nil {
+			if err := rows.Scan(&name, &dataType, &isNullable, &columnKey, &defaultValue, &extra); err == nil {
 				columns = append(columns, map[string]interface{}{
-					"name":        field,
-					"type":        typeStr,
-					"nullable":    null == "YES",
-					"primary_key": strings.Contains(key, "PRI"),
+					"name":        name,
+					"type":        dataType,
+					"nullable":    isNullable == "YES",
+					"primary_key": strings.Contains(columnKey, "PRI"),
 					"default":     defaultValue.String,
 				})
 			}
 		case models.PostgreSQL:
-			var columnName, dataType, isNullable string
-			var columnDefault sql.NullString
-			if err := rows.Scan(&columnName, &dataType, &isNullable, &columnDefault); err == nil {
+			var name, dataType, isNullable string
+			var defaultValue sql.NullString
+			if err := rows.Scan(&name, &dataType, &isNullable, &defaultValue); err == nil {
 				columns = append(columns, map[string]interface{}{
-					"name":     columnName,
-					"type":     dataType,
-					"nullable": isNullable == "YES",
-					"default":  columnDefault.String,
+					"name":        name,
+					"type":        dataType,
+					"nullable":    isNullable == "YES",
+					"primary_key": false, // PostgreSQL 需要额外查询主键，简化处理
+					"default":     defaultValue.String,
+				})
+			}
+		case models.Oracle:
+			var name, dataType, nullable string
+			var defaultValue sql.NullString
+			if err := rows.Scan(&name, &dataType, &nullable, &defaultValue); err == nil {
+				columns = append(columns, map[string]interface{}{
+					"name":        name,
+					"type":        dataType,
+					"nullable":    nullable == "Y",
+					"primary_key": false,
+					"default":     defaultValue.String,
+				})
+			}
+		case models.SQLServer:
+			var name, dataType, isNullable string
+			var defaultValue sql.NullString
+			if err := rows.Scan(&name, &dataType, &isNullable, &defaultValue); err == nil {
+				columns = append(columns, map[string]interface{}{
+					"name":        name,
+					"type":        dataType,
+					"nullable":    isNullable == "YES",
+					"primary_key": false,
+					"default":     defaultValue.String,
 				})
 			}
 		}
 	}
-
-	return columns, nil
+	return columns, rows.Err()
 }
 
 // ExecuteQuery 执行SQL查询
@@ -257,30 +343,23 @@ func (s *DataSourceService) ExecuteQuery(dataSourceID uint, query string, limit 
 		return nil, err
 	}
 
-	var db *sql.DB
-
-	switch ds.Type {
-	case models.MySQL:
-		db, err = s.connectMySQL(ds)
-	case models.PostgreSQL:
-		db, err = s.connectPostgreSQL(ds)
-	default:
-		return nil, fmt.Errorf("不支持的数据库类型")
-	}
-
+	db, err := s.openDB(ds)
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
 
-	// 添加限制
+	// 添加 LIMIT 子句（如果支持且用户未提供）
 	if limit > 0 {
-		if strings.Contains(strings.ToUpper(query), "LIMIT") {
-			// 如果已有LIMIT，不添加
-		} else if ds.Type == models.MySQL {
-			query += fmt.Sprintf(" LIMIT %d", limit)
-		} else if ds.Type == models.PostgreSQL {
-			query += fmt.Sprintf(" LIMIT %d", limit)
+		switch ds.Type {
+		case models.MySQL, models.PostgreSQL, models.SQLServer:
+			if !strings.Contains(strings.ToUpper(query), "LIMIT") {
+				query += fmt.Sprintf(" LIMIT %d", limit)
+			}
+		case models.Oracle:
+			if !strings.Contains(strings.ToUpper(query), "ROWNUM") {
+				query = fmt.Sprintf("SELECT * FROM (%s) WHERE ROWNUM <= %d", query, limit)
+			}
 		}
 	}
 
@@ -290,29 +369,23 @@ func (s *DataSourceService) ExecuteQuery(dataSourceID uint, query string, limit 
 	}
 	defer rows.Close()
 
-	// 获取列信息
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, err
 	}
 
-	// 准备结果切片
 	results := make([]map[string]interface{}, 0)
-
 	for rows.Next() {
-		// 创建值的切片
 		values := make([]interface{}, len(columns))
 		valuePtrs := make([]interface{}, len(columns))
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
 
-		// 扫描行
 		if err := rows.Scan(valuePtrs...); err != nil {
 			return nil, err
 		}
 
-		// 创建行映射
 		row := make(map[string]interface{})
 		for i, col := range columns {
 			val := values[i]
@@ -322,34 +395,7 @@ func (s *DataSourceService) ExecuteQuery(dataSourceID uint, query string, limit 
 				row[col] = val
 			}
 		}
-
 		results = append(results, row)
 	}
-
-	return results, nil
-}
-
-// 连接辅助方法
-func (s *DataSourceService) connectMySQL(ds *models.DataSource) (*sql.DB, error) {
-	connStr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s",
-		ds.Username, ds.Password, ds.Host, ds.Port, ds.Database, ds.Charset)
-	return sql.Open("mysql", connStr)
-}
-
-func (s *DataSourceService) connectPostgreSQL(ds *models.DataSource) (*sql.DB, error) {
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-		ds.Username, ds.Password, ds.Host, ds.Port, ds.Database)
-	return sql.Open("postgres", connStr)
-}
-
-func (s *DataSourceService) connectOracle(ds *models.DataSource) (*sql.DB, error) {
-	connStr := fmt.Sprintf("oracle://%s:%s@%s:%d/%s",
-		ds.Username, ds.Password, ds.Host, ds.Port, ds.Database)
-	return sql.Open("oracle", connStr)
-}
-
-func (s *DataSourceService) connectSQLServer(ds *models.DataSource) (*sql.DB, error) {
-	connStr := fmt.Sprintf("server=%s;port=%d;database=%s;user id=%s;password=%s",
-		ds.Host, ds.Port, ds.Database, ds.Username, ds.Password)
-	return sql.Open("sqlserver", connStr)
+	return results, rows.Err()
 }

@@ -1,12 +1,12 @@
 server:
-  port: 8080
+  port: 8015
   mode: debug
   
 database:
   path: "data/migrator.db"
   
 datax:
-  path: "/opt/datax"
+  path: "/home/koca/datax"
   job_path: "data/jobs"
   log_path: "logs/datax"
   python_path: "python3"
