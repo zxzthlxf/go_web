@@ -236,13 +236,20 @@ func (s *DataXService) generateSettingConfig(job *models.MigrationJob) map[strin
 func (s *DataXService) getReaderPluginName(dbType models.DatabaseType) string {
 	supported := viper.GetStringMapString("supported_databases")
 	if plugin, ok := supported[string(dbType)]; ok {
-		// 假设配置文件格式为 "mysqlreader,mysqlwriter"
 		parts := strings.Split(plugin, ",")
-		if len(parts) > 0 && parts[0] != "" {
+		// 优先取第一个作为reader
+		if len(parts) >= 1 && parts[0] != "" {
 			return parts[0]
 		}
+		// 如果只有一个部分且以reader结尾，直接使用
+		if len(parts) == 1 && strings.HasSuffix(parts[0], "reader") {
+			return parts[0]
+		}
+		// 如果只有一个部分且不是reader，尝试将writer转换为reader
+		if len(parts) == 1 && strings.HasSuffix(parts[0], "writer") {
+			return strings.TrimSuffix(parts[0], "writer") + "reader"
+		}
 	}
-	// 如果未找到，尝试根据常见类型返回默认值（可选）
 	switch dbType {
 	case models.MySQL:
 		return "mysqlreader"
@@ -255,7 +262,8 @@ func (s *DataXService) getReaderPluginName(dbType models.DatabaseType) string {
 	case models.MongoDB:
 		return "mongodbreader"
 	default:
-		return "streamreader" // 最后 fallback
+		log.Printf("未知数据库类型 %s，使用streamreader作为默认reader", dbType)
+		return "streamreader"
 	}
 }
 
@@ -263,26 +271,35 @@ func (s *DataXService) getReaderPluginName(dbType models.DatabaseType) string {
 func (s *DataXService) getWriterPluginName(dbType models.DatabaseType) string {
 	supported := viper.GetStringMapString("supported_databases")
 	if plugin, ok := supported[string(dbType)]; ok {
-		// 假设配置文件格式为 "mysqlreader,mysqlwriter"
 		parts := strings.Split(plugin, ",")
-		if len(parts) > 0 && parts[0] != "" {
+		// 如果配置有两个部分，第二部分是writer
+		if len(parts) >= 2 && parts[1] != "" {
+			return parts[1]
+		}
+		// 如果配置只有一个部分，检查它是否以 "writer" 结尾
+		if len(parts) == 1 && strings.HasSuffix(parts[0], "writer") {
 			return parts[0]
 		}
+		// 如果只有一个部分且不是writer，尝试将reader转换为writer（例如mysqlreader -> mysqlwriter）
+		if len(parts) == 1 && strings.HasSuffix(parts[0], "reader") {
+			return strings.TrimSuffix(parts[0], "reader") + "writer"
+		}
 	}
-	// 如果未找到，尝试根据常见类型返回默认值（可选）
+	// 根据常见类型返回默认writer
 	switch dbType {
 	case models.MySQL:
-		return "mysqlreader"
+		return "mysqlwriter"
 	case models.PostgreSQL:
-		return "postgresqlreader"
+		return "postgresqlwriter"
 	case models.Oracle:
-		return "oraclereader"
+		return "oraclewriter"
 	case models.SQLServer:
-		return "sqlserverreader"
+		return "sqlserverwriter"
 	case models.MongoDB:
-		return "mongodbreader"
+		return "mongodbwriter"
 	default:
-		return "streamreader" // 最后 fallback
+		log.Printf("未知数据库类型 %s，使用streamwriter作为默认writer", dbType)
+		return "streamwriter"
 	}
 }
 
