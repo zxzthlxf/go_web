@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,6 +103,8 @@ func (s *DataXService) GenerateConfig(job *models.MigrationJob) (string, error) 
 	if err := ioutil.WriteFile(configFile, configJSON, 0644); err != nil {
 		return "", fmt.Errorf("保存配置文件失败: %v", err)
 	}
+
+	log.Printf("生成配置: jobID=%d", job.ID)
 
 	return configFile, nil
 }
@@ -233,37 +236,71 @@ func (s *DataXService) generateSettingConfig(job *models.MigrationJob) map[strin
 func (s *DataXService) getReaderPluginName(dbType models.DatabaseType) string {
 	supported := viper.GetStringMapString("supported_databases")
 	if plugin, ok := supported[string(dbType)]; ok {
+		// 假设配置文件格式为 "mysqlreader,mysqlwriter"
 		parts := strings.Split(plugin, ",")
-		if len(parts) > 0 {
-			return parts[0] // reader
+		if len(parts) > 0 && parts[0] != "" {
+			return parts[0]
 		}
 	}
-	return "streamreader"
+	// 如果未找到，尝试根据常见类型返回默认值（可选）
+	switch dbType {
+	case models.MySQL:
+		return "mysqlreader"
+	case models.PostgreSQL:
+		return "postgresqlreader"
+	case models.Oracle:
+		return "oraclereader"
+	case models.SQLServer:
+		return "sqlserverreader"
+	case models.MongoDB:
+		return "mongodbreader"
+	default:
+		return "streamreader" // 最后 fallback
+	}
 }
 
 // getWriterPluginName 获取写入插件名称
 func (s *DataXService) getWriterPluginName(dbType models.DatabaseType) string {
 	supported := viper.GetStringMapString("supported_databases")
 	if plugin, ok := supported[string(dbType)]; ok {
+		// 假设配置文件格式为 "mysqlreader,mysqlwriter"
 		parts := strings.Split(plugin, ",")
-		if len(parts) > 1 {
-			return parts[1] // writer
+		if len(parts) > 0 && parts[0] != "" {
+			return parts[0]
 		}
 	}
-	return "streamwriter"
+	// 如果未找到，尝试根据常见类型返回默认值（可选）
+	switch dbType {
+	case models.MySQL:
+		return "mysqlreader"
+	case models.PostgreSQL:
+		return "postgresqlreader"
+	case models.Oracle:
+		return "oraclereader"
+	case models.SQLServer:
+		return "sqlserverreader"
+	case models.MongoDB:
+		return "mongodbreader"
+	default:
+		return "streamreader" // 最后 fallback
+	}
 }
 
+// getColumnsForJob 获取字段列表
 // getColumnsForJob 获取字段列表
 func (s *DataXService) getColumnsForJob(job *models.MigrationJob) []string {
 	mappings := job.GetColumnMappings()
 	if len(mappings) > 0 {
-		columns := make([]string, len(mappings))
-		for i, mapping := range mappings {
-			columns[i] = mapping.SourceColumn
+		columns := make([]string, 0, len(mappings))
+		for _, mapping := range mappings {
+			if mapping.SourceColumn != "" { // 只添加非空字段
+				columns = append(columns, mapping.SourceColumn)
+			}
 		}
-		return columns
+		if len(columns) > 0 {
+			return columns
+		}
 	}
-
 	// 如果没有映射，返回所有字段
 	return []string{"*"}
 }
@@ -272,11 +309,15 @@ func (s *DataXService) getColumnsForJob(job *models.MigrationJob) []string {
 func (s *DataXService) getTargetColumns(job *models.MigrationJob) []string {
 	mappings := job.GetColumnMappings()
 	if len(mappings) > 0 {
-		columns := make([]string, len(mappings))
-		for i, mapping := range mappings {
-			columns[i] = mapping.TargetColumn
+		columns := make([]string, 0, len(mappings))
+		for _, mapping := range mappings {
+			if mapping.TargetColumn != "" { // 只添加非空字段
+				columns = append(columns, mapping.TargetColumn)
+			}
 		}
-		return columns
+		if len(columns) > 0 {
+			return columns
+		}
 	}
 	return s.getColumnsForJob(job)
 }
@@ -304,16 +345,23 @@ func (s *DataXService) getSourceQuery(job *models.MigrationJob) string {
 		return job.SourceQuery
 	}
 
-	mappings := job.GetColumnMappings()
-	if len(mappings) > 0 {
-		columns := make([]string, len(mappings))
-		for i, mapping := range mappings {
-			columns[i] = mapping.SourceColumn
-		}
-		return fmt.Sprintf("SELECT %s FROM %s", strings.Join(columns, ", "), job.SourceTable)
+	columns := s.getColumnsForJob(job)
+	// 如果列列表为空（可能是所有字段被过滤掉了），则使用 "*"
+	if len(columns) == 0 || (len(columns) == 1 && columns[0] == "") {
+		columns = []string{"*"}
 	}
 
-	return fmt.Sprintf("SELECT * FROM %s", job.SourceTable)
+	// 构建 SELECT 语句
+	if len(columns) == 1 && columns[0] == "*" {
+		return fmt.Sprintf("SELECT * FROM %s", job.SourceTable)
+	}
+
+	// 对字段名进行可能的引号处理（可选）
+	quotedColumns := make([]string, len(columns))
+	for i, col := range columns {
+		quotedColumns[i] = "`" + col + "`" // MySQL风格，可根据数据库类型调整
+	}
+	return fmt.Sprintf("SELECT %s FROM %s", strings.Join(quotedColumns, ", "), job.SourceTable)
 }
 
 // ExecuteJob 执行迁移任务

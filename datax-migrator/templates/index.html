@@ -720,7 +720,7 @@
         </div>
     </div>
 
-    <!-- 添加任务模态框 -->
+    <!-- 添加任务模态框（改进版） -->
     <div class="modal fade" id="addJobModal" tabindex="-1">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
@@ -769,23 +769,22 @@
                             </div>
                         </div>
                         
-                        <!-- 源配置标签页 -->
+                        <!-- 源配置标签页（改进版：下拉选择表，显示详情） -->
                         <div class="tab-pane fade" id="tab-source">
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">源数据源 *</label>
-                                    <select class="form-select" id="sourceDataSource">
-                                        <option value="">请选择数据源</option>
+                                    <select class="form-select" id="sourceDataSource" required>
+                                        <option value="">请选择源数据源</option>
                                     </select>
+                                    <!-- 数据源详情显示区 -->
+                                    <div id="sourceDataSourceDetail" class="small text-muted mt-1"></div>
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">源表名 *</label>
-                                    <div class="input-group">
-                                        <input type="text" class="form-control" id="sourceTable" placeholder="表名">
-                                        <button class="btn btn-outline-secondary" type="button" id="btnBrowseSourceTables">
-                                            <i class="bi bi-folder"></i>
-                                        </button>
-                                    </div>
+                                    <select class="form-select" id="sourceTable" required>
+                                        <option value="">请先选择数据源</option>
+                                    </select>
                                 </div>
                             </div>
                             <div class="mb-3">
@@ -796,18 +795,21 @@
                             </div>
                         </div>
                         
-                        <!-- 目标配置标签页 -->
+                        <!-- 目标配置标签页（改进版） -->
                         <div class="tab-pane fade" id="tab-target">
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">目标数据源 *</label>
-                                    <select class="form-select" id="targetDataSource">
-                                        <option value="">请选择数据源</option>
+                                    <select class="form-select" id="targetDataSource" required>
+                                        <option value="">请选择目标数据源</option>
                                     </select>
+                                    <div id="targetDataSourceDetail" class="small text-muted mt-1"></div>
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">目标表名 *</label>
-                                    <input type="text" class="form-control" id="targetTable" required>
+                                    <select class="form-select" id="targetTable" required>
+                                        <option value="">请先选择数据源</option>
+                                    </select>
                                 </div>
                             </div>
                             <div class="mb-3">
@@ -1074,6 +1076,11 @@
             
             // 显示第一个页面
             showPage('data-sources');
+            
+            // 任务模态框显示时刷新数据源下拉框（确保最新）
+            document.getElementById('addJobModal').addEventListener('show.bs.modal', function() {
+                loadDataSourcesForJobModal();
+            });
         });
         
         // 显示页面
@@ -1211,7 +1218,7 @@
             `).join('');
         }
         
-        // 测试数据源连接
+        // 测试数据源连接（卡片）
         async function testDataSource(id) {
             try {
                 const response = await fetch(`/api/v1/data-sources/${id}/test`, {
@@ -1235,84 +1242,381 @@
             const formData = new FormData(form);
             const data = Object.fromEntries(formData.entries());
             
-            // 简单验证
             if (!data.name || !data.type || !data.host || !data.port || !data.database) {
                 showError('请填写必填字段');
                 return;
             }
             
-            // 这里应该发送测试请求到后端
-            showSuccess('连接测试功能需要后端实现');
-        }
-        
-        // 保存数据源
-        async function saveDataSource() {
-            const form = document.getElementById('dataSourceForm');
-            const formData = new FormData(form);
-            const data = Object.fromEntries(formData.entries());
-            
-            // 验证
-            if (!data.name || !data.type || !data.host || !data.port || !data.database || 
-                !data.username || !data.password) {
-                showError('请填写所有必填字段');
-                return;
-            }
-            
+            // 发送测试请求到后端
             try {
-                const response = await fetch('/api/v1/data-sources', {
+                const response = await fetch('/api/v1/data-sources/test', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
-                
                 const result = await response.json();
-                
-                if (response.ok) {
-                    showSuccess('数据源保存成功');
-                    bootstrap.Modal.getInstance(document.getElementById('addDataSourceModal')).hide();
-                    form.reset();
-                    loadDataSources();
+                if (result.success) {
+                    showSuccess('连接测试成功');
                 } else {
-                    showError(result.error || '保存失败');
+                    showError('连接测试失败: ' + result.message);
                 }
             } catch (error) {
-                showError('保存数据源失败');
+                showError('连接测试请求失败');
             }
         }
         
-        // 删除数据源
-        async function deleteDataSource(id) {
-            if (!confirm('确定要删除这个数据源吗？')) return;
-            
-            try {
-                const response = await fetch(`/api/v1/data-sources/${id}`, {
-                    method: 'DELETE'
-                });
-                
-                if (response.ok) {
-                    showSuccess('数据源删除成功');
-                    loadDataSources();
-                } else {
-                    const data = await response.json();
-                    showError(data.error || '删除失败');
-                }
-            } catch (error) {
-                showError('删除数据源失败');
-            }
+       async function saveDataSource() {
+    const form = document.getElementById('dataSourceForm');
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+    
+    data.port = parseInt(data.port, 10);
+    if (data.extra && typeof data.extra === 'object') {
+        data.extra = JSON.stringify(data.extra);
+    }
+    
+    let url = '/api/v1/data-sources';
+    let method = 'POST';
+    
+    if (editingDataSourceId) {
+        url = `/api/v1/data-sources/${editingDataSourceId}`;
+        method = 'PUT';
+        // 密码为空时，表示不修改密码，需要从data中删除该字段，避免后端更新为空
+        if (!data.password) {
+            delete data.password;
         }
+    }
+    
+    try {
+        const response = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        if (response.ok) {
+            showSuccess(editingDataSourceId ? '数据源更新成功' : '数据源保存成功');
+            document.getElementById('addDataSourceModal').addEventListener('hidden.bs.modal', function () {
+    document.getElementById('dataSourceForm').reset();
+    editingDataSourceId = null;
+    document.querySelector('#addDataSourceModal .modal-title').textContent = '添加数据源';
+    document.getElementById('btnSaveDataSource').textContent = '保存';
+});
+            loadDataSources();
+        } else {
+            showError(result.error + (result.details ? ': ' + result.details : ''));
+        }
+    } catch (error) {
+        showError('保存数据源失败');
+    }
+}
+
+let sourceColumns = [];   // 源表字段列表 [{name, type, primaryKey?}]
+let targetColumns = [];   // 目标表字段列表
+let mappings = [];        // 当前映射关系 [{source, target, dataType, isPrimaryKey, transform}]
+
+async function loadTableColumns(dataSourceId, tableName, isSource) {
+    if (!dataSourceId || !tableName) return [];
+    try {
+        const response = await fetch(`/api/v1/databases/columns?data_source_id=${dataSourceId}&table_name=${encodeURIComponent(tableName)}`);
+        const data = await response.json();
+        return data.columns || [];
+    } catch (error) {
+        console.error('加载字段列表失败:', error);
+        showError('加载字段列表失败');
+        return [];
+    }
+}
+
+        // 当前正在编辑的数据源ID
+let editingDataSourceId = null;
+
+// 编辑数据源
+async function editDataSource(id) {
+    try {
+        const response = await fetch(`/api/v1/data-sources/${id}`);
+        const result = await response.json();
+        const ds = result.data_source;
         
-        // 使用数据源
+        // 填充表单
+        const form = document.getElementById('dataSourceForm');
+        form.name.value = ds.name || '';
+        form.type.value = ds.type || '';
+        form.host.value = ds.host || '';
+        form.port.value = ds.port || '';
+        form.database.value = ds.database || '';
+        form.charset.value = ds.charset || 'utf8mb4';
+        form.username.value = ds.username || '';
+        form.password.value = ds.password || ''; // 注意：密码通常不回显，留空表示不修改
+        form.extra.value = ds.extra || '';
+        
+        // 记录编辑ID
+        editingDataSourceId = id;
+        
+        // 修改模态框标题和保存按钮文本
+        document.querySelector('#addDataSourceModal .modal-title').textContent = '编辑数据源';
+        document.getElementById('btnSaveDataSource').textContent = '更新';
+        
+        // 显示模态框
+        const modal = new bootstrap.Modal(document.getElementById('addDataSourceModal'));
+        modal.show();
+    } catch (error) {
+        console.error('加载数据源详情失败:', error);
+        showError('加载数据源详情失败');
+    }
+}
+        
+        // 使用数据源（跳转到任务创建）
         function useDataSource(id) {
-            // 切换到任务创建页面
             showPage('jobs');
-            
-            // 这里可以预填充任务创建表单
             setTimeout(() => {
                 const modal = new bootstrap.Modal(document.getElementById('addJobModal'));
                 modal.show();
             }, 100);
+        }
+        
+        // 加载数据源并填充任务模态框的下拉框
+        function loadDataSourcesForJobModal() {
+            fetch('/api/v1/data-sources')
+                .then(response => response.json())
+                .then(data => {
+                    dataSources = data.data_sources || [];
+                    
+                    const sourceSelect = document.getElementById('sourceDataSource');
+                    const targetSelect = document.getElementById('targetDataSource');
+                    
+                    sourceSelect.innerHTML = '<option value="">请选择源数据源</option>';
+                    targetSelect.innerHTML = '<option value="">请选择目标数据源</option>';
+                    
+                    data.data_sources.forEach(ds => {
+                        const optionSource = document.createElement('option');
+                        optionSource.value = ds.id;
+                        optionSource.textContent = `${ds.name} (${ds.type})`;
+                        sourceSelect.appendChild(optionSource);
+                        
+                        const optionTarget = document.createElement('option');
+                        optionTarget.value = ds.id;
+                        optionTarget.textContent = `${ds.name} (${ds.type})`;
+                        targetSelect.appendChild(optionTarget);
+                    });
+                    
+                    // 清空详情和表下拉框
+                    document.getElementById('sourceDataSourceDetail').innerHTML = '';
+                    document.getElementById('targetDataSourceDetail').innerHTML = '';
+                    // document.getElementById('sourceTable').innerHTML = '<option value="">请先选择数据源</option>';
+                    // document.getElementById('targetTable').innerHTML = '<option value="">请先选择数据源</option>';
+                    
+document.getElementById('sourceTable').addEventListener('change', async function() {
+    const dsId = parseInt(document.getElementById('sourceDataSource').value);
+    const table = this.value;
+    if (dsId && table) {
+        sourceColumns = await loadTableColumns(dsId, table, true);
+        // 如果目标表也已选择，尝试自动映射
+        if (document.getElementById('targetTable').value) {
+            autoMapColumns();
+        }
+    } else {
+        sourceColumns = [];
+    }
+    renderMappingTable();
+});
+
+document.getElementById('targetTable').addEventListener('change', async function() {
+    const dsId = parseInt(document.getElementById('targetDataSource').value);
+    const table = this.value;
+    if (dsId && table) {
+        targetColumns = await loadTableColumns(dsId, table, false);
+        // 如果源表也已选择，尝试自动映射
+        if (document.getElementById('sourceTable').value) {
+            autoMapColumns();
+        }
+    } else {
+        targetColumns = [];
+    }
+    renderMappingTable();
+});
+
+
+                    // 重新绑定事件（先移除旧事件避免重复）
+                    sourceSelect.removeEventListener('change', sourceChangeHandler);
+                    sourceSelect.addEventListener('change', sourceChangeHandler);
+                    
+                    targetSelect.removeEventListener('change', targetChangeHandler);
+                    targetSelect.addEventListener('change', targetChangeHandler);
+                })
+                .catch(error => console.error('加载数据源失败:', error));
+        }
+        
+        // 源数据源变更处理
+        async function sourceChangeHandler() {
+            const dsId = parseInt(this.value);
+            showDataSourceDetail('sourceDataSource', 'sourceDataSourceDetail');
+            await loadTablesForDataSource(dsId, 'sourceTable');
+        }
+        
+        // 目标数据源变更处理
+        async function targetChangeHandler() {
+            const dsId = parseInt(this.value);
+            showDataSourceDetail('targetDataSource', 'targetDataSourceDetail');
+            await loadTablesForDataSource(dsId, 'targetTable');
+        }
+
+       function autoMapColumns() {
+    mappings = [];
+    // 仅当源和目标都有字段时才映射
+    if (sourceColumns.length === 0 || targetColumns.length === 0) return;
+    
+    // 简单按名称匹配
+    const sourceMap = new Map(sourceColumns.map(c => [c.name.toLowerCase(), c]));
+    const targetMap = new Map(targetColumns.map(c => [c.name.toLowerCase(), c]));
+    
+    for (let [name, sourceCol] of sourceMap) {
+        if (targetMap.has(name)) {
+            mappings.push({
+                source: sourceCol.name,
+                target: targetMap.get(name).name,
+                dataType: sourceCol.type || '',
+                isPrimaryKey: sourceCol.primary_key || false,
+                transform: ''
+            });
+        }
+    }
+    
+    // 如果无匹配，按索引顺序（长度相等时）
+    if (mappings.length === 0 && sourceColumns.length === targetColumns.length) {
+        for (let i = 0; i < sourceColumns.length; i++) {
+            mappings.push({
+                source: sourceColumns[i].name,
+                target: targetColumns[i].name,
+                dataType: sourceColumns[i].type || '',
+                isPrimaryKey: sourceColumns[i].primary_key || false,
+                transform: ''
+            });
+        }
+    }
+    
+    renderMappingTable();
+}
+
+function renderMappingTable() {
+    const tbody = document.getElementById('mappingTableBody');
+    if (mappings.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">暂无字段映射，请先选择源表和目标表</td></tr>`;
+        return;
+    }
+    
+    tbody.innerHTML = mappings.map((m, index) => `
+        <tr>
+            <td><input type="checkbox" class="mapping-select" data-index="${index}"></td>
+            <td>
+                <select class="form-select form-select-sm source-col-select" data-index="${index}">
+                    ${sourceColumns.map(col => `<option value="${col.name}" ${col.name === m.source ? 'selected' : ''}>${col.name} (${col.type})</option>`).join('')}
+                </select>
+            </td>
+            <td>
+                <select class="form-select form-select-sm target-col-select" data-index="${index}">
+                    ${targetColumns.map(col => `<option value="${col.name}" ${col.name === m.target ? 'selected' : ''}>${col.name} (${col.type})</option>`).join('')}
+                </select>
+            </td>
+            <td><input type="text" class="form-control form-control-sm" value="${m.dataType || ''}" placeholder="数据类型"></td>
+            <td><input type="checkbox" class="form-check-input primary-key-check" data-index="${index}" ${m.isPrimaryKey ? 'checked' : ''}></td>
+            <td><input type="text" class="form-control form-control-sm" value="${m.transform || ''}" placeholder="转换规则"></td>
+            <td><button class="btn btn-sm btn-outline-danger" onclick="removeMapping(${index})"><i class="bi bi-trash"></i></button></td>
+        </tr>
+    `).join('');
+    
+    // 绑定事件
+    document.querySelectorAll('.source-col-select').forEach(sel => {
+        sel.addEventListener('change', function(e) {
+            const idx = this.dataset.index;
+            mappings[idx].source = this.value;
+        });
+    });
+    document.querySelectorAll('.target-col-select').forEach(sel => {
+        sel.addEventListener('change', function(e) {
+            const idx = this.dataset.index;
+            mappings[idx].target = this.value;
+        });
+    });
+    document.querySelectorAll('.primary-key-check').forEach(cb => {
+        cb.addEventListener('change', function(e) {
+            const idx = this.dataset.index;
+            mappings[idx].isPrimaryKey = this.checked;
+        });
+    });
+}
+
+document.getElementById('btnAddMapping').addEventListener('click', function() {
+    if (sourceColumns.length === 0 || targetColumns.length === 0) {
+        showError('请先选择源表和目标表');
+        return;
+    }
+    mappings.push({
+        source: sourceColumns[0]?.name || '',
+        target: targetColumns[0]?.name || '',
+        dataType: '',
+        isPrimaryKey: false,
+        transform: ''
+    });
+    renderMappingTable();
+});
+
+function removeMapping(index) {
+    mappings.splice(index, 1);
+    renderMappingTable();
+}
+
+document.getElementById('btnDeleteSelectedMappings').addEventListener('click', function() {
+    const selected = document.querySelectorAll('.mapping-select:checked');
+    const indices = Array.from(selected).map(cb => parseInt(cb.dataset.index)).sort((a,b) => b - a);
+    for (let idx of indices) {
+        mappings.splice(idx, 1);
+    }
+    renderMappingTable();
+});
+
+document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
+        
+        // 显示数据源详情
+        function showDataSourceDetail(selectId, detailId) {
+            const select = document.getElementById(selectId);
+            const detailDiv = document.getElementById(detailId);
+            const selectedId = parseInt(select.value);
+            if (!selectedId) {
+                detailDiv.innerHTML = '';
+                return;
+            }
+            const ds = dataSources.find(ds => ds.id === selectedId);
+            if (ds) {
+                detailDiv.innerHTML = `${ds.host}:${ds.port}/${ds.database}`;
+            }
+        }
+        
+        // 加载表列表
+        async function loadTablesForDataSource(dataSourceId, targetSelectId) {
+            if (!dataSourceId) {
+                document.getElementById(targetSelectId).innerHTML = '<option value="">请先选择数据源</option>';
+                return;
+            }
+            try {
+                const response = await fetch(`/api/v1/databases/tables?data_source_id=${dataSourceId}`);
+                const data = await response.json();
+                const select = document.getElementById(targetSelectId);
+                select.innerHTML = '<option value="">请选择表</option>';
+                if (data.tables && data.tables.length > 0) {
+                    data.tables.forEach(table => {
+                        const option = document.createElement('option');
+                        option.value = table;
+                        option.textContent = table;
+                        select.appendChild(option);
+                    });
+                } else {
+                    select.innerHTML = '<option value="">该数据源无表</option>';
+                }
+            } catch (error) {
+                console.error('加载表列表失败:', error);
+                showError('加载表列表失败');
+            }
         }
         
         // 加载任务
@@ -1331,6 +1635,7 @@
         // 渲染任务列表
         function renderJobs() {
             const tbody = document.getElementById('jobsTableBody');
+            console.log('任务数据:', jobs); // 查看 job 对象是否包含 id
             if (!tbody) return;
             
             if (jobs.length === 0) {
@@ -1392,6 +1697,9 @@
                                 <button class="btn btn-outline-danger" onclick="stopJob(${job.id})">
                                     <i class="bi bi-stop"></i>
                                 </button>
+                                <button class="btn btn-outline-danger" onclick="deleteJob(${job.id})">
+                                    <i class="bi bi-trash"></i>
+                                </button>
                             </div>
                         </td>
                     </tr>
@@ -1425,6 +1733,8 @@
                 document.getElementById('sourceTableDetail').textContent = job.source_query || job.source_table;
                 document.getElementById('targetDetail').textContent = job.target ? job.target.name : '未知';
                 document.getElementById('targetTableDetail').textContent = job.target_table;
+
+                
                 
                 const progressPercent = job.total_records > 0 ? 
                     (job.processed_records / job.total_records * 100).toFixed(1) : 0;
@@ -1532,6 +1842,48 @@
                 showError('停止任务失败');
             }
         }
+
+        // 删除任务
+        async function deleteJob(jobId) {
+            console.log('deleteJob 接收到的参数:', jobId, '类型:', typeof jobId);
+            if (typeof jobId !== 'number') {
+                // 如果接收到事件对象，将其转换为数字ID（不推荐，应修复调用处）
+                if (jobId && jobId.target) {
+                    // 尝试从按钮属性获取ID（后备方案）
+                    const id = jobId.target.closest('button')?.getAttribute('data-job-id');
+                    if (id) {
+                        jobId = parseInt(id);
+                    } else {
+                        showError('无效的任务ID');
+                        return;
+                    }
+                } else {
+                    showError('无效的任务ID');
+                    return;
+                }
+            }
+
+            if (!jobId) return;
+            
+            if (!confirm('确定要删除这个任务吗？此操作不可撤销。')) return;
+            
+            try {
+                const response = await fetch(`/api/v1/jobs/${jobId}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showSuccess('任务删除成功');
+                    loadJobs(); // 重新加载任务列表
+                } else {
+                    showError(data.error || '删除任务失败');
+                }
+            } catch (error) {
+                showError('删除任务失败');
+            }
+        }
         
         // 任务标签页导航
         function prevJobTab() {
@@ -1588,13 +1940,23 @@
                 showError('请填写所有必填字段');
                 return;
             }
+
+            jobData.column_mappings = JSON.stringify(mappings);
+jobData.config = JSON.stringify({
+    speed: {
+        channel: parseInt(document.getElementById('channelCount').value),
+        // 可以添加 bytes, records 等
+    },
+    errorLimit: {
+        record: parseInt(document.getElementById('maxErrorCount').value),
+        percentage: 0.0 // 可扩展
+    }
+});
             
             try {
                 const response = await fetch('/api/v1/jobs', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(jobData)
                 });
                 
@@ -1617,9 +1979,9 @@
         function resetJobForm() {
             document.getElementById('jobName').value = '';
             document.getElementById('jobDescription').value = '';
-            document.getElementById('sourceTable').value = '';
+            document.getElementById('sourceTable').innerHTML = '<option value="">请先选择数据源</option>';
             document.getElementById('sourceQuery').value = '';
-            document.getElementById('targetTable').value = '';
+            document.getElementById('targetTable').innerHTML = '<option value="">请先选择数据源</option>';
             document.getElementById('batchSize').value = '1000';
             document.getElementById('scheduleEnabled').checked = false;
             document.getElementById('cronExpression').value = '';
@@ -1757,7 +2119,7 @@
             });
         }
         
-        // 加载数据库表
+        // 加载数据库表（查询页面使用）
         async function loadDatabaseTables(dataSourceId) {
             try {
                 const response = await fetch(`/api/v1/databases/tables?data_source_id=${dataSourceId}`);

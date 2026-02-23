@@ -41,7 +41,7 @@ supported_databases:
     reader: "hdfsreader"
     writer: "hdfswriter"
   hive:
-    reader: "hdfsreader"
+    reader: "hivereader"
     writer: "hivewriter"
   elasticsearch:
     reader: "elasticsearchreader"

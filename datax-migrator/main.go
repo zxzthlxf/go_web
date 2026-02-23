@@ -26,7 +26,7 @@ func initConfig() {
 
 	// 设置默认配置
 	viper.SetDefault("server.port", "8080")
-	viper.SetDefault("datax.path", "/opt/datax")
+	viper.SetDefault("datax.path", "/home/koca/datax")
 	viper.SetDefault("database.path", "data/migrator.db")
 	viper.SetDefault("log.path", "logs")
 	viper.SetDefault("max_workers", 5)
@@ -99,6 +99,7 @@ func main() {
 		api.PUT("/data-sources/:id", handlers.UpdateDataSource(dataSourceService))
 		api.DELETE("/data-sources/:id", handlers.DeleteDataSource(dataSourceService))
 		api.POST("/data-sources/:id/test", handlers.TestDataSource(dataSourceService))
+		api.POST("/data-sources/test", handlers.TestDataSourceConnection(dataSourceService))
 
 		// 迁移任务管理
 		api.GET("/jobs", handlers.ListJobs(jobService))

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
@@ -62,6 +63,8 @@ func UpdateJob(jobService *services.JobService) gin.HandlerFunc {
 // DeleteJob 删除迁移任务
 func DeleteJob(jobService *services.JobService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		idStr := c.Param("id")
+		log.Printf("接收到的删除请求 ID 原始值: %s", idStr) // 添加日志
 		id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的任务ID"})

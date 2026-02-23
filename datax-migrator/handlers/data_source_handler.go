@@ -146,6 +146,24 @@ func TestDataSource(dsService *services.DataSourceService) gin.HandlerFunc {
 	}
 }
 
+// TestDataSourceConnection 测试数据源连接（无需保存）
+func TestDataSourceConnection(dsService *services.DataSourceService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var ds models.DataSource
+		if err := c.ShouldBindJSON(&ds); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误", "details": err.Error()})
+			return
+		}
+		// 测试连接
+		err := dsService.TestDataSource(&ds)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "连接成功"})
+	}
+}
+
 // GetDatabaseTables 获取数据库表列表
 func GetDatabaseTables(dsService *services.DataSourceService) gin.HandlerFunc {
 	return func(c *gin.Context) {
