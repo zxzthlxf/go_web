@@ -1023,7 +1023,11 @@
         let dataSources = [];
         let jobs = [];
         let currentJobId = null;
-        
+        let sourceColumns = [];   // 源表字段列表 [{name, type, primaryKey?}]
+        let targetColumns = [];   // 目标表字段列表
+        let mappings = [];        // 当前映射关系 [{source, target, dataType, isPrimaryKey, transform}]
+        let editingDataSourceId = null;
+
         // 页面初始化
         document.addEventListener('DOMContentLoaded', function() {
             // 侧边栏切换
@@ -1039,16 +1043,22 @@
                 item.addEventListener('click', function(e) {
                     e.preventDefault();
                     
-                    // 更新活动状态
                     document.querySelectorAll('.sidebar-item').forEach(i => {
                         i.classList.remove('active');
                     });
                     this.classList.add('active');
                     
-                    // 切换页面
                     const page = this.getAttribute('data-page');
                     showPage(page);
                 });
+            });
+            
+            // 数据源模态框隐藏时重置
+            document.getElementById('addDataSourceModal').addEventListener('hidden.bs.modal', function() {
+                document.getElementById('dataSourceForm').reset();
+                editingDataSourceId = null;
+                document.querySelector('#addDataSourceModal .modal-title').textContent = '添加数据源';
+                document.getElementById('btnSaveDataSource').textContent = '保存';
             });
             
             // 数据源表单事件
@@ -1067,8 +1077,12 @@
             document.getElementById('btnSaveJob').addEventListener('click', saveJob);
             
             // 任务操作按钮
-            document.getElementById('btnRunJob').addEventListener('click', runJob);
-            document.getElementById('btnStopJob').addEventListener('click', stopJob);
+            document.getElementById('btnRunJob').addEventListener('click', function() {
+                if (currentJobId) runJob(currentJobId);
+            });
+            document.getElementById('btnStopJob').addEventListener('click', function() {
+                if (currentJobId) stopJob(currentJobId);
+            });
             
             // 加载初始数据
             loadDataSources();
@@ -1077,25 +1091,56 @@
             // 显示第一个页面
             showPage('data-sources');
             
-            // 任务模态框显示时刷新数据源下拉框（确保最新）
+            // 任务模态框显示时刷新数据源下拉框
             document.getElementById('addJobModal').addEventListener('show.bs.modal', function() {
                 loadDataSourcesForJobModal();
             });
+
+            // 使用事件委托处理源表和目标表下拉框的 change 事件
+            document.addEventListener('change', async function(e) {
+                if (e.target.id === 'sourceTable') {
+                    const dsId = parseInt(document.getElementById('sourceDataSource').value);
+                    const table = e.target.value;
+                    if (dsId && table) {
+                        sourceColumns = await loadTableColumns(dsId, table, true);
+                        if (document.getElementById('targetTable').value) {
+                            autoMapColumns();
+                        }
+                    } else {
+                        sourceColumns = [];
+                    }
+                    renderMappingTable();
+                } else if (e.target.id === 'targetTable') {
+                    const dsId = parseInt(document.getElementById('targetDataSource').value);
+                    const table = e.target.value;
+                    if (dsId && table) {
+                        targetColumns = await loadTableColumns(dsId, table, false);
+                        if (document.getElementById('sourceTable').value) {
+                            autoMapColumns();
+                        }
+                    } else {
+                        targetColumns = [];
+                    }
+                    renderMappingTable();
+                }
+            });
+
+            // 字段映射相关按钮
+            document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
+            document.getElementById('btnAddMapping').addEventListener('click', addMapping);
+            document.getElementById('btnDeleteSelectedMappings').addEventListener('click', deleteSelectedMappings);
         });
-        
+
         // 显示页面
         function showPage(page) {
             currentPage = page;
             
-            // 隐藏所有页面
             document.querySelectorAll('.page-content').forEach(el => {
                 el.style.display = 'none';
             });
             
-            // 显示当前页面
             document.getElementById(`${page}-page`).style.display = 'block';
             
-            // 页面特定初始化
             switch(page) {
                 case 'data-sources':
                     renderDataSources();
@@ -1247,17 +1292,14 @@
                 return;
             }
 
-            // 将端口转为整数
             data.port = parseInt(data.port, 10);
             
-            // 如果 extra 字段是对象，转为 JSON 字符串（一般不会发生，但保持兼容）
             if (data.extra && typeof data.extra === 'object') {
                 data.extra = JSON.stringify(data.extra);
             }
             
-            console.log('测试连接发送数据:', data); // 调试输出
+            console.log('测试连接发送数据:', data);
             
-            // 发送测试请求到后端
             try {
                 const response = await fetch('/api/v1/data-sources/test', {
                     method: 'POST',
@@ -1275,106 +1317,77 @@
             }
         }
         
-       async function saveDataSource() {
-    const form = document.getElementById('dataSourceForm');
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
-    
-    data.port = parseInt(data.port, 10);
-    if (data.extra && typeof data.extra === 'object') {
-        data.extra = JSON.stringify(data.extra);
-    }
-    
-    let url = '/api/v1/data-sources';
-    let method = 'POST';
-    
-    if (editingDataSourceId) {
-        url = `/api/v1/data-sources/${editingDataSourceId}`;
-        method = 'PUT';
-        // 密码为空时，表示不修改密码，需要从data中删除该字段，避免后端更新为空
-        if (!data.password) {
-            delete data.password;
+        // 保存数据源
+        async function saveDataSource() {
+            const form = document.getElementById('dataSourceForm');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            
+            data.port = parseInt(data.port, 10);
+            if (data.extra && typeof data.extra === 'object') {
+                data.extra = JSON.stringify(data.extra);
+            }
+            
+            let url = '/api/v1/data-sources';
+            let method = 'POST';
+            
+            if (editingDataSourceId) {
+                url = `/api/v1/data-sources/${editingDataSourceId}`;
+                method = 'PUT';
+                if (!data.password) {
+                    delete data.password;
+                }
+            }
+            
+            try {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    showSuccess(editingDataSourceId ? '数据源更新成功' : '数据源保存成功');
+                    bootstrap.Modal.getInstance(document.getElementById('addDataSourceModal')).hide();
+                    loadDataSources();
+                } else {
+                    showError(result.error + (result.details ? ': ' + result.details : ''));
+                }
+            } catch (error) {
+                showError('保存数据源失败');
+            }
         }
-    }
-    
-    try {
-        const response = await fetch(url, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        const result = await response.json();
-        if (response.ok) {
-            showSuccess(editingDataSourceId ? '数据源更新成功' : '数据源保存成功');
-            document.getElementById('addDataSourceModal').addEventListener('hidden.bs.modal', function () {
-    document.getElementById('dataSourceForm').reset();
-    editingDataSourceId = null;
-    document.querySelector('#addDataSourceModal .modal-title').textContent = '添加数据源';
-    document.getElementById('btnSaveDataSource').textContent = '保存';
-});
-            loadDataSources();
-        } else {
-            showError(result.error + (result.details ? ': ' + result.details : ''));
+
+        // 编辑数据源
+        async function editDataSource(id) {
+            try {
+                const response = await fetch(`/api/v1/data-sources/${id}`);
+                const result = await response.json();
+                const ds = result.data_source;
+                
+                const form = document.getElementById('dataSourceForm');
+                form.name.value = ds.name || '';
+                form.type.value = ds.type || '';
+                form.host.value = ds.host || '';
+                form.port.value = ds.port || '';
+                form.database.value = ds.database || '';
+                form.charset.value = ds.charset || 'utf8mb4';
+                form.username.value = ds.username || '';
+                form.password.value = ds.password || '';
+                form.extra.value = ds.extra || '';
+                
+                editingDataSourceId = id;
+                
+                document.querySelector('#addDataSourceModal .modal-title').textContent = '编辑数据源';
+                document.getElementById('btnSaveDataSource').textContent = '更新';
+                
+                const modal = new bootstrap.Modal(document.getElementById('addDataSourceModal'));
+                modal.show();
+            } catch (error) {
+                console.error('加载数据源详情失败:', error);
+                showError('加载数据源详情失败');
+            }
         }
-    } catch (error) {
-        showError('保存数据源失败');
-    }
-}
-
-let sourceColumns = [];   // 源表字段列表 [{name, type, primaryKey?}]
-let targetColumns = [];   // 目标表字段列表
-let mappings = [];        // 当前映射关系 [{source, target, dataType, isPrimaryKey, transform}]
-
-async function loadTableColumns(dataSourceId, tableName, isSource) {
-    if (!dataSourceId || !tableName) return [];
-    try {
-        const response = await fetch(`/api/v1/databases/columns?data_source_id=${dataSourceId}&table_name=${encodeURIComponent(tableName)}`);
-        const data = await response.json();
-        return data.columns || [];
-    } catch (error) {
-        console.error('加载字段列表失败:', error);
-        showError('加载字段列表失败');
-        return [];
-    }
-}
-
-        // 当前正在编辑的数据源ID
-let editingDataSourceId = null;
-
-// 编辑数据源
-async function editDataSource(id) {
-    try {
-        const response = await fetch(`/api/v1/data-sources/${id}`);
-        const result = await response.json();
-        const ds = result.data_source;
-        
-        // 填充表单
-        const form = document.getElementById('dataSourceForm');
-        form.name.value = ds.name || '';
-        form.type.value = ds.type || '';
-        form.host.value = ds.host || '';
-        form.port.value = ds.port || '';
-        form.database.value = ds.database || '';
-        form.charset.value = ds.charset || 'utf8mb4';
-        form.username.value = ds.username || '';
-        form.password.value = ds.password || ''; // 注意：密码通常不回显，留空表示不修改
-        form.extra.value = ds.extra || '';
-        
-        // 记录编辑ID
-        editingDataSourceId = id;
-        
-        // 修改模态框标题和保存按钮文本
-        document.querySelector('#addDataSourceModal .modal-title').textContent = '编辑数据源';
-        document.getElementById('btnSaveDataSource').textContent = '更新';
-        
-        // 显示模态框
-        const modal = new bootstrap.Modal(document.getElementById('addDataSourceModal'));
-        modal.show();
-    } catch (error) {
-        console.error('加载数据源详情失败:', error);
-        showError('加载数据源详情失败');
-    }
-}
         
         // 使用数据源（跳转到任务创建）
         function useDataSource(id) {
@@ -1413,40 +1426,9 @@ async function editDataSource(id) {
                     // 清空详情和表下拉框
                     document.getElementById('sourceDataSourceDetail').innerHTML = '';
                     document.getElementById('targetDataSourceDetail').innerHTML = '';
-                    // document.getElementById('sourceTable').innerHTML = '<option value="">请先选择数据源</option>';
-                    // document.getElementById('targetTable').innerHTML = '<option value="">请先选择数据源</option>';
+                    document.getElementById('sourceTable').innerHTML = '<option value="">请先选择数据源</option>';
+                    document.getElementById('targetTable').innerHTML = '<option value="">请先选择数据源</option>';
                     
-document.getElementById('sourceTable').addEventListener('change', async function() {
-    const dsId = parseInt(document.getElementById('sourceDataSource').value);
-    const table = this.value;
-    if (dsId && table) {
-        sourceColumns = await loadTableColumns(dsId, table, true);
-        // 如果目标表也已选择，尝试自动映射
-        if (document.getElementById('targetTable').value) {
-            autoMapColumns();
-        }
-    } else {
-        sourceColumns = [];
-    }
-    renderMappingTable();
-});
-
-document.getElementById('targetTable').addEventListener('change', async function() {
-    const dsId = parseInt(document.getElementById('targetDataSource').value);
-    const table = this.value;
-    if (dsId && table) {
-        targetColumns = await loadTableColumns(dsId, table, false);
-        // 如果源表也已选择，尝试自动映射
-        if (document.getElementById('sourceTable').value) {
-            autoMapColumns();
-        }
-    } else {
-        targetColumns = [];
-    }
-    renderMappingTable();
-});
-
-
                     // 重新绑定事件（先移除旧事件避免重复）
                     sourceSelect.removeEventListener('change', sourceChangeHandler);
                     sourceSelect.addEventListener('change', sourceChangeHandler);
@@ -1471,122 +1453,6 @@ document.getElementById('targetTable').addEventListener('change', async function
             await loadTablesForDataSource(dsId, 'targetTable');
         }
 
-       function autoMapColumns() {
-    mappings = [];
-    // 仅当源和目标都有字段时才映射
-    if (sourceColumns.length === 0 || targetColumns.length === 0) return;
-    
-    // 简单按名称匹配
-    const sourceMap = new Map(sourceColumns.map(c => [c.name.toLowerCase(), c]));
-    const targetMap = new Map(targetColumns.map(c => [c.name.toLowerCase(), c]));
-    
-    for (let [name, sourceCol] of sourceMap) {
-        if (targetMap.has(name)) {
-            mappings.push({
-                source: sourceCol.name,
-                target: targetMap.get(name).name,
-                dataType: sourceCol.type || '',
-                isPrimaryKey: sourceCol.primary_key || false,
-                transform: ''
-            });
-        }
-    }
-    
-    // 如果无匹配，按索引顺序（长度相等时）
-    if (mappings.length === 0 && sourceColumns.length === targetColumns.length) {
-        for (let i = 0; i < sourceColumns.length; i++) {
-            mappings.push({
-                source: sourceColumns[i].name,
-                target: targetColumns[i].name,
-                dataType: sourceColumns[i].type || '',
-                isPrimaryKey: sourceColumns[i].primary_key || false,
-                transform: ''
-            });
-        }
-    }
-    
-    renderMappingTable();
-}
-
-function renderMappingTable() {
-    const tbody = document.getElementById('mappingTableBody');
-    if (mappings.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">暂无字段映射，请先选择源表和目标表</td></tr>`;
-        return;
-    }
-    
-    tbody.innerHTML = mappings.map((m, index) => `
-        <tr>
-            <td><input type="checkbox" class="mapping-select" data-index="${index}"></td>
-            <td>
-                <select class="form-select form-select-sm source-col-select" data-index="${index}">
-                    ${sourceColumns.map(col => `<option value="${col.name}" ${col.name === m.source ? 'selected' : ''}>${col.name} (${col.type})</option>`).join('')}
-                </select>
-            </td>
-            <td>
-                <select class="form-select form-select-sm target-col-select" data-index="${index}">
-                    ${targetColumns.map(col => `<option value="${col.name}" ${col.name === m.target ? 'selected' : ''}>${col.name} (${col.type})</option>`).join('')}
-                </select>
-            </td>
-            <td><input type="text" class="form-control form-control-sm" value="${m.dataType || ''}" placeholder="数据类型"></td>
-            <td><input type="checkbox" class="form-check-input primary-key-check" data-index="${index}" ${m.isPrimaryKey ? 'checked' : ''}></td>
-            <td><input type="text" class="form-control form-control-sm" value="${m.transform || ''}" placeholder="转换规则"></td>
-            <td><button class="btn btn-sm btn-outline-danger" onclick="removeMapping(${index})"><i class="bi bi-trash"></i></button></td>
-        </tr>
-    `).join('');
-    
-    // 绑定事件
-    document.querySelectorAll('.source-col-select').forEach(sel => {
-        sel.addEventListener('change', function(e) {
-            const idx = this.dataset.index;
-            mappings[idx].source = this.value;
-        });
-    });
-    document.querySelectorAll('.target-col-select').forEach(sel => {
-        sel.addEventListener('change', function(e) {
-            const idx = this.dataset.index;
-            mappings[idx].target = this.value;
-        });
-    });
-    document.querySelectorAll('.primary-key-check').forEach(cb => {
-        cb.addEventListener('change', function(e) {
-            const idx = this.dataset.index;
-            mappings[idx].isPrimaryKey = this.checked;
-        });
-    });
-}
-
-document.getElementById('btnAddMapping').addEventListener('click', function() {
-    if (sourceColumns.length === 0 || targetColumns.length === 0) {
-        showError('请先选择源表和目标表');
-        return;
-    }
-    mappings.push({
-        source: sourceColumns[0]?.name || '',
-        target: targetColumns[0]?.name || '',
-        dataType: '',
-        isPrimaryKey: false,
-        transform: ''
-    });
-    renderMappingTable();
-});
-
-function removeMapping(index) {
-    mappings.splice(index, 1);
-    renderMappingTable();
-}
-
-document.getElementById('btnDeleteSelectedMappings').addEventListener('click', function() {
-    const selected = document.querySelectorAll('.mapping-select:checked');
-    const indices = Array.from(selected).map(cb => parseInt(cb.dataset.index)).sort((a,b) => b - a);
-    for (let idx of indices) {
-        mappings.splice(idx, 1);
-    }
-    renderMappingTable();
-});
-
-document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
-        
         // 显示数据源详情
         function showDataSourceDetail(selectId, detailId) {
             const select = document.getElementById(selectId);
@@ -1628,6 +1494,147 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 showError('加载表列表失败');
             }
         }
+
+        // 加载字段列表
+        async function loadTableColumns(dataSourceId, tableName, isSource) {
+            if (!dataSourceId || !tableName) return [];
+            try {
+                const response = await fetch(`/api/v1/databases/columns?data_source_id=${dataSourceId}&table_name=${encodeURIComponent(tableName)}`);
+                const data = await response.json();
+                return data.columns || [];
+            } catch (error) {
+                console.error('加载字段列表失败:', error);
+                showError('加载字段列表失败');
+                return [];
+            }
+        }
+
+        // 自动映射
+        function autoMapColumns() {
+            mappings = [];
+            if (sourceColumns.length === 0 || targetColumns.length === 0) return;
+            
+            const sourceMap = new Map(sourceColumns.map(c => [c.name.toLowerCase(), c]));
+            const targetMap = new Map(targetColumns.map(c => [c.name.toLowerCase(), c]));
+            
+            for (let [name, sourceCol] of sourceMap) {
+                if (targetMap.has(name)) {
+                    mappings.push({
+                        source: sourceCol.name,
+                        target: targetMap.get(name).name,
+                        dataType: sourceCol.type || '',
+                        isPrimaryKey: sourceCol.primary_key || false,
+                        transform: ''
+                    });
+                }
+            }
+            
+            if (mappings.length === 0 && sourceColumns.length === targetColumns.length) {
+                for (let i = 0; i < sourceColumns.length; i++) {
+                    mappings.push({
+                        source: sourceColumns[i].name,
+                        target: targetColumns[i].name,
+                        dataType: sourceColumns[i].type || '',
+                        isPrimaryKey: sourceColumns[i].primary_key || false,
+                        transform: ''
+                    });
+                }
+            }
+            
+            renderMappingTable();
+        }
+
+        // 渲染映射表格
+        function renderMappingTable() {
+            const tbody = document.getElementById('mappingTableBody');
+            if (mappings.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">暂无字段映射，请先选择源表和目标表</td></tr>`;
+                return;
+            }
+            
+            tbody.innerHTML = mappings.map((m, index) => `
+                <tr>
+                    <td><input type="checkbox" class="mapping-select" data-index="${index}"></td>
+                    <td>
+                        <select class="form-select form-select-sm source-col-select" data-index="${index}">
+                            ${sourceColumns.map(col => `<option value="${col.name}" ${col.name === m.source ? 'selected' : ''}>${col.name} (${col.type})</option>`).join('')}
+                        </select>
+                    </td>
+                    <td>
+                        <select class="form-select form-select-sm target-col-select" data-index="${index}">
+                            ${targetColumns.map(col => `<option value="${col.name}" ${col.name === m.target ? 'selected' : ''}>${col.name} (${col.type})</option>`).join('')}
+                        </select>
+                    </td>
+                    <td><input type="text" class="form-control form-control-sm" value="${m.dataType || ''}" placeholder="数据类型"></td>
+                    <td><input type="checkbox" class="form-check-input primary-key-check" data-index="${index}" ${m.isPrimaryKey ? 'checked' : ''}></td>
+                    <td><input type="text" class="form-control form-control-sm" value="${m.transform || ''}" placeholder="转换规则"></td>
+                    <td><button class="btn btn-sm btn-outline-danger btn-delete-mapping" data-index="${index}"><i class="bi bi-trash"></i></button></td>
+                </tr>
+            `).join('');
+            
+            // 由于使用了事件委托，不需要再绑定每个元素
+        }
+
+        // 添加映射
+        function addMapping() {
+            if (sourceColumns.length === 0 || targetColumns.length === 0) {
+                showError('请先选择源表和目标表');
+                return;
+            }
+            mappings.push({
+                source: sourceColumns[0]?.name || '',
+                target: targetColumns[0]?.name || '',
+                dataType: '',
+                isPrimaryKey: false,
+                transform: ''
+            });
+            renderMappingTable();
+        }
+
+        // 删除单个映射
+        function removeMapping(index) {
+            mappings.splice(index, 1);
+            renderMappingTable();
+        }
+
+        // 删除选中映射
+        function deleteSelectedMappings() {
+            const selected = document.querySelectorAll('.mapping-select:checked');
+            const indices = Array.from(selected).map(cb => parseInt(cb.dataset.index)).sort((a,b) => b - a);
+            for (let idx of indices) {
+                mappings.splice(idx, 1);
+            }
+            renderMappingTable();
+        }
+
+        // 事件委托处理映射表格内的变化和删除
+        document.getElementById('mappingTableBody').addEventListener('change', function(e) {
+            const target = e.target;
+            const index = target.dataset.index;
+            if (index === undefined) return;
+            
+            if (target.classList.contains('source-col-select')) {
+                mappings[index].source = target.value;
+            } else if (target.classList.contains('target-col-select')) {
+                mappings[index].target = target.value;
+            } else if (target.classList.contains('primary-key-check')) {
+                mappings[index].isPrimaryKey = target.checked;
+            }
+        });
+
+        document.getElementById('mappingTableBody').addEventListener('click', function(e) {
+            const deleteBtn = e.target.closest('.btn-delete-mapping');
+            if (deleteBtn) {
+                const index = deleteBtn.dataset.index;
+                removeMapping(parseInt(index));
+            }
+        });
+
+        // 全选/取消全选
+        document.getElementById('selectAllMappings').addEventListener('change', function(e) {
+            const checkboxes = document.querySelectorAll('.mapping-select');
+            checkboxes.forEach(cb => cb.checked = e.target.checked);
+        });
         
         // 加载任务
         async function loadJobs() {
@@ -1645,7 +1652,7 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
         // 渲染任务列表
         function renderJobs() {
             const tbody = document.getElementById('jobsTableBody');
-            console.log('任务数据:', jobs); // 查看 job 对象是否包含 id
+            console.log('任务数据:', jobs);
             if (!tbody) return;
             
             if (jobs.length === 0) {
@@ -1707,7 +1714,7 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                                 <button class="btn btn-outline-danger" onclick="stopJob(${job.id})">
                                     <i class="bi bi-stop"></i>
                                 </button>
-                                <button class="btn btn-outline-danger" onclick="deleteJob(${job.id})">
+                                <button class="btn btn-outline-danger" onclick="deleteJob(${job.id})" data-job-id="${job.id}">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>
@@ -1726,7 +1733,6 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 
                 currentJobId = jobId;
                 
-                // 更新模态框内容
                 document.getElementById('jobDetailTitle').textContent = job.name;
                 document.getElementById('jobNameDetail').textContent = job.name;
                 document.getElementById('jobDescriptionDetail').textContent = job.description || '无描述';
@@ -1743,8 +1749,6 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 document.getElementById('sourceTableDetail').textContent = job.source_query || job.source_table;
                 document.getElementById('targetDetail').textContent = job.target ? job.target.name : '未知';
                 document.getElementById('targetTableDetail').textContent = job.target_table;
-
-                
                 
                 const progressPercent = job.total_records > 0 ? 
                     (job.processed_records / job.total_records * 100).toFixed(1) : 0;
@@ -1754,10 +1758,8 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 document.getElementById('totalRecords').textContent = job.total_records;
                 document.getElementById('errorRecords').textContent = job.error_records;
                 
-                // 加载任务日志
                 loadJobLogs(jobId);
                 
-                // 显示模态框
                 const modal = new bootstrap.Modal(document.getElementById('jobDetailModal'));
                 modal.show();
                 
@@ -1775,7 +1777,6 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 
                 const logsContainer = document.getElementById('jobLogs');
                 if (data.tasks && data.tasks.length > 0) {
-                    // 这里应该获取具体的任务日志
                     logsContainer.innerHTML = `
                         <div class="log-entry log-info">
                             <i class="bi bi-info-circle me-1"></i>
@@ -1799,13 +1800,6 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
         async function runJob(jobId) {
             if (!jobId) jobId = currentJobId;
             if (!jobId) return;
-
-                // ... 执行任务
-            if (response.ok) {
-                showSuccess('任务开始执行');
-                // 启动轮询
-                pollJobStatus(jobId);
-            }
             
             try {
                 const response = await fetch(`/api/v1/jobs/${jobId}/run`, {
@@ -1816,12 +1810,12 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 
                 if (response.ok) {
                     showSuccess('任务开始执行');
-                    loadJobs();
-                    
-                    // 如果正在查看任务详情，刷新详情
+                    loadJobs(); // 刷新列表
                     if (currentJobId === jobId) {
                         showJobDetail(jobId);
                     }
+                    // 启动轮询
+                    pollJobStatus(jobId);
                 } else {
                     showError(data.error || '任务执行失败');
                 }
@@ -1836,14 +1830,18 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 const response = await fetch(`/api/v1/jobs/${jobId}`);
                 const data = await response.json();
                 const job = data.job;
-                // 更新任务列表中的进度
                 updateJobRow(job);
                 
-                // 如果任务状态是终态（completed/failed/stopped），停止轮询
                 if (['completed', 'failed', 'stopped'].includes(job.status)) {
                     clearInterval(interval);
                 }
-            }, 3000); // 每3秒查询一次
+            }, 3000);
+        }
+
+        // 更新任务行（简单实现：重新加载整个列表）
+        function updateJobRow(job) {
+            // 实际可以优化为只更新对应行，但为了简单，重新加载
+            loadJobs();
         }
         
         // 停止任务
@@ -1863,8 +1861,6 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 if (response.ok) {
                     showSuccess('任务已停止');
                     loadJobs();
-                    
-                    // 如果正在查看任务详情，刷新详情
                     if (currentJobId === jobId) {
                         showJobDetail(jobId);
                     }
@@ -1879,24 +1875,22 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
         // 删除任务
         async function deleteJob(jobId) {
             console.log('deleteJob 接收到的参数:', jobId, '类型:', typeof jobId);
-            if (typeof jobId !== 'number') {
-                // 如果接收到事件对象，将其转换为数字ID（不推荐，应修复调用处）
-                if (jobId && jobId.target) {
-                    // 尝试从按钮属性获取ID（后备方案）
-                    const id = jobId.target.closest('button')?.getAttribute('data-job-id');
-                    if (id) {
-                        jobId = parseInt(id);
-                    } else {
-                        showError('无效的任务ID');
-                        return;
-                    }
+            
+            // 如果参数是事件对象（例如意外传递了 event），尝试从 data-job-id 获取
+            if (jobId && typeof jobId === 'object' && jobId.target) {
+                const btn = jobId.target.closest('button');
+                if (btn && btn.dataset.jobId) {
+                    jobId = parseInt(btn.dataset.jobId);
                 } else {
                     showError('无效的任务ID');
                     return;
                 }
             }
-
-            if (!jobId) return;
+            
+            if (!jobId || isNaN(jobId)) {
+                showError('无效的任务ID');
+                return;
+            }
             
             if (!confirm('确定要删除这个任务吗？此操作不可撤销。')) return;
             
@@ -1909,7 +1903,7 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 
                 if (response.ok) {
                     showSuccess('任务删除成功');
-                    loadJobs(); // 重新加载任务列表
+                    loadJobs();
                 } else {
                     showError(data.error || '删除任务失败');
                 }
@@ -1953,7 +1947,6 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
         
         // 保存任务
         async function saveJob() {
-            // 收集表单数据
             const jobData = {
                 name: document.getElementById('jobName').value,
                 description: document.getElementById('jobDescription').value,
@@ -1965,26 +1958,23 @@ document.getElementById('btnAutoMap').addEventListener('click', autoMapColumns);
                 target_table: document.getElementById('targetTable').value,
                 batch_size: parseInt(document.getElementById('batchSize').value),
                 schedule_enabled: document.getElementById('scheduleEnabled').checked,
-                cron_expression: document.getElementById('cronExpression').value
+                cron_expression: document.getElementById('cronExpression').value,
+                column_mappings: JSON.stringify(mappings),
+                config: JSON.stringify({
+                    speed: {
+                        channel: parseInt(document.getElementById('channelCount').value)
+                    },
+                    errorLimit: {
+                        record: parseInt(document.getElementById('maxErrorCount').value),
+                        percentage: 0.0
+                    }
+                })
             };
             
-            // 验证
             if (!jobData.name || !jobData.source_id || !jobData.target_id || !jobData.target_table) {
                 showError('请填写所有必填字段');
                 return;
             }
-
-            jobData.column_mappings = JSON.stringify(mappings);
-jobData.config = JSON.stringify({
-    speed: {
-        channel: parseInt(document.getElementById('channelCount').value),
-        // 可以添加 bytes, records 等
-    },
-    errorLimit: {
-        record: parseInt(document.getElementById('maxErrorCount').value),
-        percentage: 0.0 // 可扩展
-    }
-});
             
             try {
                 const response = await fetch('/api/v1/jobs', {
@@ -2018,8 +2008,9 @@ jobData.config = JSON.stringify({
             document.getElementById('batchSize').value = '1000';
             document.getElementById('scheduleEnabled').checked = false;
             document.getElementById('cronExpression').value = '';
+            mappings = []; // 清空映射
+            renderMappingTable();
             
-            // 回到第一个标签页
             const firstTab = document.querySelector('#jobTabs .nav-link');
             bootstrap.Tab.getOrCreateInstance(firstTab).show();
         }
@@ -2088,8 +2079,6 @@ jobData.config = JSON.stringify({
             try {
                 const response = await fetch(`/api/v1/tasks/${taskId}/logs`);
                 const data = await response.json();
-                
-                // 显示日志模态框
                 showLogsModal(data.logs || []);
             } catch (error) {
                 console.error('加载任务日志失败:', error);
@@ -2125,26 +2114,21 @@ jobData.config = JSON.stringify({
                 </div>
             `;
             
-            // 移除旧的模态框
             const oldModal = document.getElementById('logsModal');
             if (oldModal) oldModal.remove();
             
-            // 添加新的模态框
             document.body.insertAdjacentHTML('beforeend', modalHtml);
             
-            // 显示模态框
             const modal = new bootstrap.Modal(document.getElementById('logsModal'));
             modal.show();
         }
         
         // 初始化查询工具
         function initQueryTool() {
-            // 填充数据源选择框
             const sourceSelect = document.getElementById('queryDataSource');
             sourceSelect.innerHTML = '<option value="">请选择数据源</option>' +
                 dataSources.map(ds => `<option value="${ds.id}">${ds.name} (${ds.type})</option>`).join('');
             
-            // 数据源变更事件
             sourceSelect.addEventListener('change', function() {
                 if (this.value) {
                     loadDatabaseTables(this.value);
@@ -2170,19 +2154,13 @@ jobData.config = JSON.stringify({
         
         // 初始化监控
         function initMonitor() {
-            // 更新统计数据
             updateStats();
-            
-            // 初始化图表
             initChart();
-            
-            // 更新系统状态
             updateSystemStatus();
         }
         
         // 更新统计数据
         function updateStats() {
-            // 这里应该从API获取实时数据
             const total = jobs.length;
             const running = jobs.filter(j => j.status === 'running').length;
             const success = jobs.filter(j => j.status === 'completed').length;
@@ -2198,7 +2176,6 @@ jobData.config = JSON.stringify({
         function initChart() {
             const ctx = document.getElementById('migrationChart').getContext('2d');
             
-            // 创建示例图表
             new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -2225,7 +2202,6 @@ jobData.config = JSON.stringify({
         
         // 更新系统状态
         function updateSystemStatus() {
-            // 模拟系统状态
             document.getElementById('cpuUsage').textContent = '45%';
             document.getElementById('cpuProgress').style.width = '45%';
             document.getElementById('memoryUsage').textContent = '68%';
@@ -2260,14 +2236,11 @@ jobData.config = JSON.stringify({
                 </div>
             `;
             
-            // 移除旧的Toast
             const oldToast = document.querySelector('.position-fixed.bottom-0.end-0');
             if (oldToast) oldToast.remove();
             
-            // 添加新的Toast
             document.body.insertAdjacentHTML('beforeend', toastHtml);
             
-            // 5秒后自动移除
             setTimeout(() => {
                 const toast = document.querySelector('.position-fixed.bottom-0.end-0');
                 if (toast) toast.remove();
