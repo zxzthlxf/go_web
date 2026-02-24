@@ -126,8 +126,8 @@ func (s *DataXService) generateReaderConfig(job *models.MigrationJob) map[string
 			"column":   s.getColumnsForJob(job),
 			"connection": []map[string]interface{}{
 				{
-					"query":   s.getSourceQuery(job),   // DataX中query应为字符串
-					"jdbcUrl": job.Source.GetJDBCURL(), // 字符串而非数组
+					"query":   []string{s.getSourceQuery(job)},
+					"jdbcUrl": []string{job.Source.GetJDBCURL()},
 				},
 			},
 			"fetchSize": job.BatchSize,
@@ -160,7 +160,7 @@ func (s *DataXService) generateWriterConfig(job *models.MigrationJob) map[string
 			"column":    s.getTargetColumns(job),
 			"connection": []map[string]interface{}{
 				{
-					"jdbcUrl": job.Target.GetJDBCURL(),
+					"jdbcUrl": []string{job.Target.GetJDBCURL()},
 					"table":   []string{job.TargetTable},
 				},
 			},
