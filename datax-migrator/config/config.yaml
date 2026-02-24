@@ -6,7 +6,7 @@ database:
   path: "data/migrator.db"
   
 datax:
-  path: "/home/koca/datax"
+  path: "/home/koca/datax/bin"
   job_path: "data/jobs"
   log_path: "logs/datax"
   python_path: "python3"
