@@ -1800,6 +1800,18 @@
         async function runJob(jobId) {
             if (!jobId) jobId = currentJobId;
             if (!jobId) return;
+
+            // 在 runJob 或 stopJob 中关闭模态框
+            const modalEl = document.getElementById('jobDetailModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) {
+                modal.hide();
+                // 监听一次隐藏事件，清理遮罩
+                modalEl.addEventListener('hidden.bs.modal', function handler() {
+                    cleanupModalBackdrop(); // 调用上面定义的函数
+                    modalEl.removeEventListener('hidden.bs.modal', handler);
+                });
+            }
             
             try {
                 const response = await fetch(`/api/v1/jobs/${jobId}/run`, {
@@ -1850,6 +1862,18 @@
             if (!jobId) return;
             
             if (!confirm('确定要停止这个任务吗？')) return;
+
+            // 在 runJob 或 stopJob 中关闭模态框
+            const modalEl = document.getElementById('jobDetailModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) {
+                modal.hide();
+                // 监听一次隐藏事件，清理遮罩
+                modalEl.addEventListener('hidden.bs.modal', function handler() {
+                    cleanupModalBackdrop(); // 调用上面定义的函数
+                    modalEl.removeEventListener('hidden.bs.modal', handler);
+                });
+            }
             
             try {
                 const response = await fetch(`/api/v1/jobs/${jobId}/stop`, {
@@ -2245,6 +2269,20 @@
                 const toast = document.querySelector('.position-fixed.bottom-0.end-0');
                 if (toast) toast.remove();
             }, 5000);
+        }
+
+        // 强制移除所有遮罩层，恢复body滚动
+        function cleanupModalBackdrop() {
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.removeProperty('overflow');
+            document.body.style.removeProperty('padding-right');
+        }
+
+        // 为任务详情模态框添加隐藏事件，确保遮罩被清理
+        const jobDetailModal = document.getElementById('jobDetailModal');
+        if (jobDetailModal) {
+            jobDetailModal.addEventListener('hidden.bs.modal', cleanupModalBackdrop);
         }
     </script>
 </body>
